@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <!-- ??????????????????? -->
+    <linearGradient id="riverWater" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2e6ba8"/>
+      <stop offset="50%" stop-color="#4a9ad4"/>
+      <stop offset="100%" stop-color="#6bb8e8"/>
+    </linearGradient>
+    <!-- ????????? -->
+    <linearGradient id="riverBank" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#a09070"/>
+      <stop offset="100%" stop-color="#7a6b52"/>
+    </linearGradient>
+    <!-- ???? -->
+    <radialGradient id="waterShine">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#aaddff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- ????? -->
+  <path d="M32 4 L60 32 L32 60 L4 32 Z" fill="#5a8e4e" stroke="#4a7e3e" stroke-width="0.5"/>
+  <!-- ???????S???? -->
+  <path d="M6 34 Q18 28 26 36 Q34 44 50 40 L54 44 Q36 50 24 40 Q12 36 6 38 Z" fill="url(#riverBank)"/>
+  <path d="M10 34 Q18 31 22 35 Q26 40 44 39 L46 42 Q28 46 20 38 Q14 35 10 36 Z" fill="#8b7a5a"/>
+  <!-- ?? -->
+  <path d="M14 35 Q20 32 24 35.5 Q28 39 40 39.5 L38 42 Q26 44 20 38.5 Q16 36 14 36.5 Z" fill="url(#riverWater)"/>
+  <!-- ??????? -->
+  <path d="M18 35.5 Q22 34.5 26 36" fill="none" stroke="#7fc8f0" stroke-width="0.5" opacity="0.6"/>
+  <path d="M24 37.5 Q28 36.5 32 38" fill="none" stroke="#7fc8f0" stroke-width="0.5" opacity="0.5"/>
+  <path d="M30 39 Q34 38 38 39.5" fill="none" stroke="#7fc8f0" stroke-width="0.5" opacity="0.4"/>
+  <!-- ??????? -->
+  <ellipse cx="22" cy="35" rx="6" ry="2.5" fill="url(#waterShine)"/>
+  <ellipse cx="34" cy="38" rx="4" ry="1.5" fill="#cceeff" opacity="0.35"/>
+</svg>

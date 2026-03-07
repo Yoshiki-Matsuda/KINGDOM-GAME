@@ -1,0 +1,21 @@
+[package]
+name = "kingdom-server"
+version = "0.1.0"
+edition = "2021"
+description = "キングダム戦略ゲーム バックエンド（axum / WebSocket / イベント駆動）"
+
+[dependencies]
+# Web フレームワーク
+axum = { version = "0.7", features = ["json", "ws", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors"] }
+
+# 直列化（フロントと共通データモデル用）
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ワイプ／新規ゲーム時のランダム地形
+rand = "0.8"
+
+[dev-dependencies]
+reqwest = "0.11"
