@@ -23,8 +23,6 @@ let characterPickerEl: HTMLDivElement;
 let editingUnitId: string | null = null;
 let editingSlotIndex: 0 | 1 | 2 | null = null;
 
-/** 枠を展開しているユニットID（再描画後も維持） */
-let expandedUnitId: string | null = null;
 
 /** 建設済み施設を取得 */
 function getBuiltFacilitiesMap(): Map<FacilityId, number> {
@@ -49,7 +47,7 @@ export function createFormationElement(): HTMLDivElement {
   formationEl.innerHTML = `
     <div class="formation-modal">
       <div class="formation-title">編成画面</div>
-      <div class="formation-desc">ユニット一覧の行をクリックして3体の枠を表示し、枠をクリックしてキャラを選択します</div>
+      <div class="formation-desc">枠をクリックしてキャラを選択します</div>
       <div class="formation-troops" data-formation-troops>本拠地: 0 体</div>
       <div class="formation-unit-list" data-formation-unit-list></div>
       <button type="button" class="formation-add-unit" data-formation-add-unit>新規ユニットを追加</button>
@@ -76,7 +74,6 @@ export function showFormationScreen(): void {
   validateFormedUnits();
   editingUnitId = null;
   editingSlotIndex = null;
-  expandedUnitId = null;
   formationEl.classList.add("is-open");
   characterPickerEl.classList.remove("is-open");
   renderFormationContent();
@@ -91,7 +88,6 @@ export function closeFormationScreen(): void {
 function openCharacterPicker(unitId: string, slotIndex: 0 | 1 | 2): void {
   editingUnitId = unitId;
   editingSlotIndex = slotIndex;
-  expandedUnitId = unitId;
   renderCharacterPicker();
   characterPickerEl.classList.add("is-open");
 }
@@ -161,16 +157,7 @@ function renderFormationContent(): void {
 
     const header = document.createElement("div");
     header.className = "formation-unit-row-header";
-    const memberNames = u.indices
-      .map((i) => (i >= 0 ? getBodyDisplayName(i) : "（空き）"))
-      .join("・");
-    const stats = u.indices.every((i) => i >= 0)
-      ? ` エナジー${u.energy} SPEED${u.avgSpeed.toFixed(1)}`
-      : "";
-    header.innerHTML = `
-      <span class="formation-unit-row-name">${escapeHtml(u.name)}（${escapeHtml(memberNames)}）${escapeHtml(stats)}</span>
-      <button type="button" class="formation-dissolve" data-dissolve-id="${u.id}">解体</button>
-    `;
+    header.innerHTML = `<span class="formation-unit-row-name">${escapeHtml(u.name)}</span>`;
     row.appendChild(header);
 
     const slots = document.createElement("div");
@@ -201,11 +188,6 @@ function renderFormationContent(): void {
 
     listEl.appendChild(row);
   });
-
-  if (expandedUnitId) {
-    const row = listEl.querySelector(`[data-unit-id="${expandedUnitId}"]`);
-    if (row) row.classList.add("is-expanded");
-  }
 }
 
 function setupFormationScreen(): void {
@@ -231,16 +213,6 @@ function setupFormationScreen(): void {
 
   const listEl = formationEl.querySelector("[data-formation-unit-list]")!;
   listEl.addEventListener("click", (e) => {
-    const dissolveBtn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-dissolve-id]");
-    if (dissolveBtn) {
-      const id = dissolveBtn.dataset.dissolveId;
-      if (id) {
-        setFormedUnitsList(formedUnitsList.filter((x) => x.id !== id));
-        renderFormationContent();
-      }
-      return;
-    }
-
     const slotBtn = (e.target as HTMLElement).closest<HTMLButtonElement>("button.formation-slot");
     if (slotBtn) {
       const unitId = slotBtn.dataset.unitId;
@@ -249,16 +221,6 @@ function setupFormationScreen(): void {
         openCharacterPicker(unitId, slotIndex as 0 | 1 | 2);
       }
       return;
-    }
-
-    const row = (e.target as HTMLElement).closest<HTMLDivElement>(".formation-unit-row");
-    if (row && !slotBtn && !dissolveBtn) {
-      const unitId = row.dataset.unitId ?? null;
-      if (row.classList.toggle("is-expanded")) {
-        expandedUnitId = unitId;
-      } else {
-        expandedUnitId = null;
-      }
     }
   });
 

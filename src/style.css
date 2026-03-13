@@ -837,29 +837,30 @@ body {
   border: 1px solid #334155;
   border-radius: 12px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-  max-width: 90vw;
-  max-height: 85vh;
+  width: 95vw;
+  max-width: 900px;
+  max-height: 90vh;
   overflow-y: auto;
-  padding: 1.25rem;
+  padding: 1.5rem;
 }
 
 .formation-title {
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   font-weight: 600;
   color: #e2e8f0;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.35rem;
 }
 
 .formation-desc {
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   color: #94a3b8;
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .formation-troops {
-  font-size: 0.9rem;
+  font-size: 1rem;
   color: #cbd5e1;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .formation-cards {
@@ -972,31 +973,24 @@ body {
   color: #e2e8f0;
 }
 
-/* ユニット一覧（行クリックで3枠展開） */
+/* ユニット一覧（カード常時表示） */
 .formation-unit-list {
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .formation-unit-row {
   border: 1px solid #334155;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
+  border-radius: 10px;
+  margin-bottom: 0.75rem;
   overflow: hidden;
 }
 
 .formation-unit-row-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.6rem 1rem;
-  cursor: pointer;
+  padding: 0.65rem 1rem;
   background: #334155;
-  font-size: 0.9rem;
-}
-
-.formation-unit-row-header:hover {
-  background: #475569;
+  font-size: 1rem;
 }
 
 .formation-unit-row-name {
@@ -1004,26 +998,23 @@ body {
 }
 
 .formation-unit-slots {
-  display: none;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
   padding: 1rem;
-  gap: 0.75rem;
-  flex-wrap: wrap;
   background: #1e293b;
   border-top: 1px solid #334155;
-}
-
-.formation-unit-row.is-expanded .formation-unit-slots {
-  display: flex;
 }
 
 .formation-slot {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 100px;
-  padding: 0.5rem;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.75rem;
   border: 2px dashed #475569;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #334155;
   color: #e2e8f0;
   cursor: pointer;
@@ -1037,34 +1028,35 @@ body {
 }
 
 .formation-slot img {
-  width: 64px;
-  height: 64px;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 1;
   object-fit: cover;
-  border-radius: 6px;
-  margin-bottom: 0.25rem;
+  border-radius: 8px;
+  margin-bottom: 0.35rem;
 }
 
 .formation-slot-name {
-  font-size: 0.8rem;
+  font-size: clamp(0.75rem, 2.5vw, 0.9rem);
   text-align: center;
+  line-height: 1.2;
 }
 
 .formation-slot-empty {
   justify-content: center;
-  min-height: 100px;
 }
 
 .formation-slot-plus {
-  font-size: 2rem;
+  font-size: clamp(1.5rem, 5vw, 2.5rem);
   color: #94a3b8;
 }
 
 .formation-add-unit {
   display: block;
   width: 100%;
-  padding: 0.6rem 1rem;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 1.25rem;
+  font-size: 1rem;
   border: 1px dashed #475569;
   border-radius: 6px;
   background: transparent;
@@ -1107,29 +1099,33 @@ body {
   max-width: 90%;
   max-height: 85%;
   overflow-y: auto;
+  width: max-content;
 }
 
 .formation-char-picker-title {
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   font-weight: 600;
   color: #e2e8f0;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .formation-char-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
   margin-bottom: 1rem;
+  justify-content: flex-start;
 }
 
 .formation-char-picker-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0.5rem;
+  width: 140px;
+  flex-shrink: 0;
+  padding: 0.75rem;
   border: 2px solid #334155;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #334155;
   color: #e2e8f0;
   cursor: pointer;
@@ -1153,15 +1149,15 @@ body {
 }
 
 .formation-char-picker-img {
-  width: 80px;
-  height: 80px;
+  width: 100px;
+  height: 100px;
   object-fit: cover;
-  border-radius: 6px;
-  margin-bottom: 0.35rem;
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
 }
 
 .formation-char-picker-name {
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   text-align: center;
 }
 
@@ -1201,8 +1197,8 @@ body {
 .formation-close {
   display: block;
   width: 100%;
-  padding: 0.6rem 1rem;
-  font-size: 0.9rem;
+  padding: 0.75rem 1.25rem;
+  font-size: 1rem;
   border: 1px solid #334155;
   border-radius: 6px;
   background: #334155;
@@ -1927,7 +1923,7 @@ body {
   /* 編成モーダル */
   .formation-modal {
     width: 95%;
-    max-width: 360px;
+    max-width: 95vw;
     padding: 1rem;
   }
   
