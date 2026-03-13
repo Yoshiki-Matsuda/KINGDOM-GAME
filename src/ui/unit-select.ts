@@ -9,7 +9,6 @@ import {
   bodyEnergies,
   bodySpeeds,
   pendingUnitAction, setPendingUnitAction,
-  travelingUnits,
   setAttackSourceId,
   render,
   getNextTravelingId,
@@ -17,9 +16,14 @@ import {
 import type { TravelingUnit } from "../store";
 import { BODIES_PER_UNIT, DEFAULT_BODY_ENERGY, DEFAULT_BODY_SPEED, getBodyDisplayName, getCharacterSkillData } from "../game/characters";
 import { getDistanceFromHome, getTravelTimeMs, startTravelIntervalIfNeeded } from "../game/travel";
-import { escapeHtml, formatTimeHHMMSS } from "../utils";
 import { closeMenu } from "./context-menu";
 import { showFormationScreen } from "./formation-screen";
+import { appendTravelingUnit } from "../store-actions";
+import {
+  getUnitSelectSnapshot,
+  renderAvailableUnits,
+  renderReturningUnits,
+} from "../unit-select-view";
 
 let unitSelectEl: HTMLDivElement;
 let unitSelectEscapeHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -72,24 +76,8 @@ export function showUnitSelect(pending: PendingUnitAction): void {
     titleEl.textContent = "援軍するユニットを選択";
   }
 
-  // 移動中（出撃中・帰還中）のユニットは選択不可。未完成ユニット（空きスロットあり）も除外
-  const travelingUnitIds = new Set(travelingUnits.map((t) => t.unitId));
-  const completeUnits = formedUnitsList.filter((u) => u.indices.every((i) => i >= 0));
-  const availableUnits = completeUnits.filter((u) => !travelingUnitIds.has(u.id));
-  const returningUnits = travelingUnits.filter((t) => t.actionType === "return" && (t.arrivalTime - Date.now()) / 1000 > 0);
-
-  const renderReturningList = (container: Element) => {
-    container.innerHTML = "";
-    if (returningUnits.length === 0) return;
-    returningUnits.forEach((t) => {
-      const secLeft = Math.ceil((t.arrivalTime - Date.now()) / 1000);
-      const timeStr = secLeft > 0 ? formatTimeHHMMSS(secLeft) : "00:00:00";
-      const row = document.createElement("div");
-      row.className = "unit-select-returning-item";
-      row.textContent = `${t.unitName}（帰還中・残り${timeStr}）`;
-      container.appendChild(row);
-    });
-  };
+  const now = Date.now();
+  const { completeUnits, availableUnits, returningUnits } = getUnitSelectSnapshot(now);
 
   if (availableUnits.length === 0) {
     panelForm.style.display = "none";
@@ -103,7 +91,7 @@ export function showUnitSelect(pending: PendingUnitAction): void {
     const listEmpty = unitSelectEl.querySelector("[data-unit-returning-list-empty]")!;
     if (returningUnits.length > 0) {
       returningEmpty.style.display = "block";
-      renderReturningList(listEmpty);
+      renderReturningUnits(listEmpty, now, returningUnits);
     } else {
       returningEmpty.style.display = "none";
     }
@@ -111,19 +99,12 @@ export function showUnitSelect(pending: PendingUnitAction): void {
     panelEmpty.style.display = "none";
     panelForm.style.display = "block";
     troopsEl.textContent = `編成済みユニットから送る1ユニットを選んでください`;
-    listEl.innerHTML = "";
-    availableUnits.forEach((u) => {
-      const label = document.createElement("label");
-      label.className = "unit-select-unit-item";
-      const memberNames = u.indices.map((i) => getBodyDisplayName(i)).join("・");
-      label.innerHTML = `<input type="radio" name="unit-select-one" data-unit-id="${u.id}" /> <span>${escapeHtml(u.name)}（${escapeHtml(memberNames)}） エナジー${u.energy} SPEED${u.avgSpeed.toFixed(1)}</span>`;
-      listEl.appendChild(label);
-    });
+    renderAvailableUnits(listEl, availableUnits);
     const returningBlock = unitSelectEl.querySelector("[data-unit-returning]") as HTMLElement;
     const returningListEl = unitSelectEl.querySelector("[data-unit-returning-list]")!;
     if (returningUnits.length > 0) {
       returningBlock.style.display = "block";
-      renderReturningList(returningListEl);
+      renderReturningUnits(returningListEl, now, returningUnits);
     } else {
       returningBlock.style.display = "none";
     }
@@ -143,22 +124,7 @@ export function closeUnitSelect(): void {
 export function updateUnitSelectReturningList(): void {
   if (!unitSelectEl.classList.contains("is-open")) return;
   const now = Date.now();
-  const travelingUnitIds = new Set(travelingUnits.map((t) => t.unitId));
-  const completeUnits = formedUnitsList.filter((u) => u.indices.every((i) => i >= 0));
-  const availableUnits = completeUnits.filter((u) => !travelingUnitIds.has(u.id));
-  const returning = travelingUnits.filter((t) => t.actionType === "return" && (t.arrivalTime - now) / 1000 > 0);
-
-  const fillReturningList = (container: Element) => {
-    container.innerHTML = "";
-    returning.forEach((t) => {
-      const secLeft = Math.ceil((t.arrivalTime - now) / 1000);
-      const timeStr = formatTimeHHMMSS(secLeft);
-      const row = document.createElement("div");
-      row.className = "unit-select-returning-item";
-      row.textContent = `${t.unitName}（帰還中・残り${timeStr}）`;
-      container.appendChild(row);
-    });
-  };
+  const { completeUnits, availableUnits, returningUnits } = getUnitSelectSnapshot(now);
 
   const panelForm = unitSelectEl.querySelector("[data-unit-panel-form]") as HTMLElement;
   const panelEmpty = unitSelectEl.querySelector("[data-unit-panel-empty]") as HTMLElement;
@@ -177,10 +143,10 @@ export function updateUnitSelectReturningList(): void {
       completeUnits.length > 0
         ? "選択できるユニットがありません。出撃中・帰還中のユニットは到着までお待ちください。"
         : "編成されたユニットがありません。編成画面でキャラ3体を選んでユニットを編成してください。";
-    if (returning.length > 0) {
+    if (returningUnits.length > 0) {
       if (returningEmpty) {
         returningEmpty.style.display = "block";
-        fillReturningList(listEmpty);
+        renderReturningUnits(listEmpty, now, returningUnits);
       }
     } else {
       if (returningEmpty) returningEmpty.style.display = "none";
@@ -189,18 +155,11 @@ export function updateUnitSelectReturningList(): void {
     panelEmpty.style.display = "none";
     panelForm.style.display = "block";
     troopsEl.textContent = "編成済みユニットから送る1ユニットを選んでください";
-    listEl.innerHTML = "";
-    availableUnits.forEach((u) => {
-      const label = document.createElement("label");
-      label.className = "unit-select-unit-item";
-      const memberNames = u.indices.map((i) => getBodyDisplayName(i)).join("・");
-      label.innerHTML = `<input type="radio" name="unit-select-one" data-unit-id="${u.id}" /> <span>${escapeHtml(u.name)}（${escapeHtml(memberNames)}） エナジー${u.energy} SPEED${u.avgSpeed.toFixed(1)}</span>`;
-      listEl.appendChild(label);
-    });
-    if (returning.length > 0) {
+    renderAvailableUnits(listEl, availableUnits);
+    if (returningUnits.length > 0) {
       if (returningBlock) {
         returningBlock.style.display = "block";
-        fillReturningList(returningListEl);
+        renderReturningUnits(returningListEl, now, returningUnits);
       }
     } else {
       if (returningBlock) returningBlock.style.display = "none";
@@ -260,7 +219,7 @@ function setupUnitSelect(): void {
       departureTime: Date.now(),
       arrivalTime: Date.now() + travelTimeMs,
     };
-    travelingUnits.push(traveling);
+    appendTravelingUnit(traveling);
     startTravelIntervalIfNeeded();
 
     if (pending.type === "attack") setAttackSourceId(null);

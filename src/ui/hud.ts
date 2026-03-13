@@ -5,7 +5,7 @@
 import {
   USE_MOCK_STATE, connectionStatus, gameState,
 } from "../store";
-import { calculateFacilityBonuses, type FacilityId } from "../game/facilities";
+import { getFacilityBonusesForState } from "../game/facility-selectors";
 
 let hudEl: HTMLDivElement;
 
@@ -22,14 +22,7 @@ export function renderHud(): void {
       ? "オンライン"
       : "オフライン";
 
-  // 施設ボーナス計算
-  const builtFacilities = new Map<FacilityId, number>();
-  for (const f of gameState.facilities ?? []) {
-    if (!f.build_complete_at || f.build_complete_at <= Date.now()) {
-      builtFacilities.set(f.facility_id as FacilityId, f.level);
-    }
-  }
-  const bonuses = calculateFacilityBonuses(builtFacilities);
+  const bonuses = getFacilityBonusesForState(gameState);
 
   const bonusTexts: string[] = [];
   if (bonuses.energyBonus > 0) bonusTexts.push(`EN+${bonuses.energyBonus}`);

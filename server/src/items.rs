@@ -3,35 +3,6 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-/// アイテムのレアリティ
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ItemRarity {
-    Common,
-    Uncommon,
-    Rare,
-    Epic,
-    Legendary,
-}
-
-/// アイテムのカテゴリ
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ItemCategory {
-    Material,
-    SkillBook,
-    Special,
-}
-
-/// アイテム定義
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ItemDef {
-    pub id: String,
-    pub name: String,
-    pub rarity: ItemRarity,
-    pub category: ItemCategory,
-}
-
 /// インベントリ内のアイテム
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InventoryItem {
@@ -89,9 +60,39 @@ pub mod item_ids {
 
 use item_ids::*;
 
+fn normalize_enemy_type(enemy_type: &str) -> &str {
+    match enemy_type.trim_end_matches(|c| c == 'A' || c == 'B' || c == 'C') {
+        "ゴーレム" => "golem",
+        "ファントム" => "phantom",
+        "スケルトンナイト" => "skeleton_knight",
+        "トレジャーミミック" => "treasure_mimic",
+        "ダークウィザード" => "dark_wizard",
+        "スライムキング" => "slime_king",
+        "カースドアーマー" | "呪われた鎧" => "cursed_armor",
+        "シャドウアサシン" => "shadow_assassin",
+        "フレイムスピリット" | "炎の精霊" => "flame_spirit",
+        "アイスエレメンタル" | "氷の精霊" => "ice_elemental",
+        "ポイズンスパイダー" | "毒蜘蛛" => "poison_spider",
+        "ストーンガーゴイル" => "stone_gargoyle",
+        "デーモンインプ" => "demon_imp",
+        "デスナイト" => "death_knight",
+        "ネクロマンサー" => "necromancer",
+        "クリスタルゴーレム" => "crystal_golem",
+        "サンダーホーク" => "thunder_hawk",
+        "アースワーム" => "earth_wyrm",
+        "ヴォイドストーカー" => "void_stalker",
+        "エンシェントマミー" => "ancient_mummy",
+        "遺跡の守護者" => "ruin_guardian",
+        "ドラゴンゾンビ" => "dragon_zombie",
+        "リッチロード" => "lich_lord",
+        "タイタンコロッサス" => "titan_colossus",
+        normalized => normalized,
+    }
+}
+
 /// 敵タイプごとのドロップテーブル
 pub fn get_drop_table(enemy_type: &str) -> Vec<DropEntry> {
-    match enemy_type {
+    match normalize_enemy_type(enemy_type) {
         // === 基本敵 ===
         "golem" | "ゴーレム" => vec![
             DropEntry { item_id: GOLD, min_count: 20, max_count: 40, chance: 1.0 },
@@ -264,35 +265,35 @@ pub fn get_drop_table(enemy_type: &str) -> Vec<DropEntry> {
         
         // === 通常敵（レベル別） ===
         // Lv1: スライム
-        "スライムA" | "スライムB" | "スライムC" => vec![
+        "スライム" => vec![
             DropEntry { item_id: GOLD, min_count: 5, max_count: 15, chance: 1.0 },
             DropEntry { item_id: ANCIENT_STONE, min_count: 1, max_count: 2, chance: 0.3 },
             DropEntry { item_id: ROTTEN_WOOD, min_count: 1, max_count: 2, chance: 0.2 },
             DropEntry { item_id: CARD_PACK_TICKET, min_count: 1, max_count: 1, chance: 0.03 },
         ],
         // Lv2: ゴブリン
-        "ゴブリンA" | "ゴブリンB" | "ゴブリンC" => vec![
+        "ゴブリン" => vec![
             DropEntry { item_id: GOLD, min_count: 10, max_count: 25, chance: 1.0 },
             DropEntry { item_id: RUSTY_GEAR, min_count: 1, max_count: 2, chance: 0.4 },
             DropEntry { item_id: ROTTEN_WOOD, min_count: 1, max_count: 3, chance: 0.3 },
             DropEntry { item_id: CARD_PACK_TICKET, min_count: 1, max_count: 1, chance: 0.05 },
         ],
         // Lv3: オーク
-        "オークA" | "オークB" | "オークC" => vec![
+        "オーク" => vec![
             DropEntry { item_id: GOLD, min_count: 20, max_count: 40, chance: 1.0 },
             DropEntry { item_id: REFINED_IRON, min_count: 1, max_count: 2, chance: 0.4 },
             DropEntry { item_id: BROKEN_BRICK, min_count: 1, max_count: 3, chance: 0.3 },
             DropEntry { item_id: CARD_PACK_TICKET, min_count: 1, max_count: 1, chance: 0.08 },
         ],
         // Lv4: 骸骨戦士
-        "骸骨戦士A" | "骸骨戦士B" | "骸骨戦士C" => vec![
+        "骸骨戦士" => vec![
             DropEntry { item_id: GOLD, min_count: 30, max_count: 60, chance: 1.0 },
             DropEntry { item_id: ANCIENT_STONE, min_count: 2, max_count: 4, chance: 0.5 },
             DropEntry { item_id: ANCIENT_BLUEPRINT, min_count: 1, max_count: 1, chance: 0.1 },
             DropEntry { item_id: CARD_PACK_TICKET, min_count: 1, max_count: 1, chance: 0.1 },
         ],
         // Lv5: オーガ
-        "オーガA" | "オーガB" | "オーガC" => vec![
+        "オーガ" => vec![
             DropEntry { item_id: GOLD, min_count: 50, max_count: 100, chance: 1.0 },
             DropEntry { item_id: REFINED_IRON, min_count: 2, max_count: 4, chance: 0.5 },
             DropEntry { item_id: MYSTIC_CRYSTAL, min_count: 1, max_count: 2, chance: 0.3 },
@@ -300,7 +301,7 @@ pub fn get_drop_table(enemy_type: &str) -> Vec<DropEntry> {
             DropEntry { item_id: RARE_PACK_TICKET, min_count: 1, max_count: 1, chance: 0.03 },
         ],
         // Lv6: ワイバーン
-        "ワイバーンA" | "ワイバーンB" | "ワイバーンC" => vec![
+        "ワイバーン" => vec![
             DropEntry { item_id: GOLD, min_count: 80, max_count: 150, chance: 1.0 },
             DropEntry { item_id: SHINING_MAGICSTONE, min_count: 1, max_count: 2, chance: 0.4 },
             DropEntry { item_id: GOLDEN_GEAR, min_count: 1, max_count: 1, chance: 0.15 },
@@ -364,21 +365,3 @@ pub fn add_items_to_inventory(inventory: &mut Vec<InventoryItem>, items: Vec<Inv
     }
 }
 
-/// インベントリからアイテムを消費
-pub fn consume_items(inventory: &mut Vec<InventoryItem>, item_id: &str, count: u32) -> bool {
-    if let Some(existing) = inventory.iter_mut().find(|i| i.item_id == item_id) {
-        if existing.count >= count {
-            existing.count -= count;
-            return true;
-        }
-    }
-    false
-}
-
-/// インベントリ内のアイテム数を取得
-pub fn get_item_count(inventory: &[InventoryItem], item_id: &str) -> u32 {
-    inventory.iter()
-        .find(|i| i.item_id == item_id)
-        .map(|i| i.count)
-        .unwrap_or(0)
-}

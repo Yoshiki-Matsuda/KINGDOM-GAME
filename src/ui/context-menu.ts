@@ -10,30 +10,16 @@ import {
   render,
 } from "../store";
 import { canReceiveReinforcement, isAttackable, getAdjacentAttackSource, isHomeTerritory } from "../game/combat";
+import {
+  formatRuinTimeLeft,
+  renderNeutralTerritoryMenu,
+  renderOwnedTerritoryMenu,
+  renderRuinContextMenu,
+} from "../context-menu-view";
 import { showUnitSelect } from "./unit-select";
 
 let menuEl: HTMLDivElement;
 let ruinTimerId: number | null = null;
-
-/** 難易度のラベル */
-function getDifficultyLabel(difficulty: string): string {
-  switch (difficulty) {
-    case "normal": return "★";
-    case "rare": return "★★";
-    case "legendary": return "★★★";
-    default: return difficulty;
-  }
-}
-
-/** 残り時間をフォーマット */
-function formatRuinTimeLeft(expiresAt: number): string {
-  const now = Date.now();
-  const remaining = Math.max(0, expiresAt - now);
-  const totalSec = Math.floor(remaining / 1000);
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  return `${min}:${sec.toString().padStart(2, "0")}`;
-}
 
 /** 残り時間を1秒ごとに更新 */
 function startRuinTimer(): void {
@@ -84,43 +70,21 @@ export function showMenuAt(x: number, y: number, territoryId: string, territory:
   }
   if (t.ruin) {
     // 遺跡マス
-    const ruin = t.ruin;
     const attackable = isAttackable(gameState, territoryId);
-    const timeLeftHtml = ruin.expires_at ? formatRuinTimeLeft(ruin.expires_at) : "";
-
-    const enemyNames = ruin.enemy_names ?? ruin.enemies;
-    menuEl.innerHTML = `
-      <div class="context-menu-ruin">
-        <div class="ruin-title">${ruin.formation_name}</div>
-        <div class="ruin-difficulty ruin-${ruin.difficulty}">${getDifficultyLabel(ruin.difficulty)}</div>
-        ${timeLeftHtml ? `<div class="ruin-time-left" data-expires-at="${ruin.expires_at}">残り ${timeLeftHtml}</div>` : ""}
-        <div class="ruin-enemies">
-          ${enemyNames.map((name) => `<span class="ruin-enemy">${name}</span>`).join("")}
-        </div>
-      </div>
-      ${attackable ? `<button type="button" data-action="attack" data-to="${territoryId}">挑戦</button>` : ""}
-    `;
+    menuEl.innerHTML = renderRuinContextMenu(territoryId, t, attackable);
 
     // 残り時間を1秒ごとに更新
-    if (ruin.expires_at) {
+    if (t.ruin.expires_at) {
       startRuinTimer();
     }
   } else {
     const canDeploy = canReceiveReinforcement(gameState, t);
 
     if (canDeploy) {
-      const isOwn = t.owner_id === "player";
-      menuEl.innerHTML = `
-      <button type="button" data-action="deploy" data-territory="${territoryId}">援軍</button>
-      ${isOwn ? `<button type="button" data-action="attack-from" data-territory="${territoryId}">攻撃</button>` : ""}
-    `;
+      menuEl.innerHTML = renderOwnedTerritoryMenu(territoryId, t);
     } else {
-      const statusText = t.owner_id ? "敵占領" : "中立";
       const attackable = isAttackable(gameState, territoryId);
-      menuEl.innerHTML = `
-      <div class="context-menu-info">Lv.${t.level} ${t.name}（${statusText}）</div>
-      ${attackable ? `<button type="button" data-action="attack" data-to="${territoryId}">攻撃</button>` : ""}
-    `;
+      menuEl.innerHTML = renderNeutralTerritoryMenu(territoryId, t, attackable);
     }
   }
 

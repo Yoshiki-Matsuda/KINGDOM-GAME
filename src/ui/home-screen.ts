@@ -10,6 +10,7 @@ import {
   setHomeFacility,
   render,
 } from "../store";
+import { replaceLocalPlayerState } from "../store-actions";
 import { DEFAULT_BODY_ENERGY } from "../game/characters";
 import { initHomeMapView, updateHomeMapView } from "../home-map-view";
 import {
@@ -18,12 +19,24 @@ import {
   getFacilitiesByCategory,
   getHomeExpansionFacility,
   canBuildFacility,
-  calculateFacilityBonuses,
   meetsExpansionRequirement,
   type FacilityId,
   type FacilityCategory,
 } from "../game/facilities";
-import { getItem, getItemCount } from "../game/items";
+import {
+  getExpansionLevel as getExpansionLevelForState,
+  getFacilityBonusesForState,
+  getFacilitiesForState,
+  getHomeGridSize as getHomeGridSizeForState,
+  getInventoryForState,
+} from "../game/facility-selectors";
+import { HOME_COL, HOME_ROW } from "../game/territories";
+import { createFacilityBuildState } from "../home-screen-build";
+import {
+  renderFacilityCard,
+  renderFacilityCosts,
+  renderPanelHeader,
+} from "../home-screen-panel";
 
 let homeEl: HTMLDivElement;
 let gridContainer: HTMLDivElement;
@@ -39,9 +52,6 @@ let buildingTimerId: number | null = null;
 let selectedTile: { col: number; row: number } | null = null;
 
 /** 城マス（本拠地の中心。ここで拡張を行う） */
-const HOME_COL = 24;
-const HOME_ROW = 24;
-
 function isCastleTile(col: number, row: number): boolean {
   return col === HOME_COL && row === HOME_ROW;
 }
@@ -50,25 +60,14 @@ function isCastleTile(col: number, row: number): boolean {
 const DEV_MODE = true;
 const DEV_BUILD_TIME_SECONDS = 5;
 
-/** 建設済み施設をMapで取得 */
-function getBuiltFacilitiesMap(): Map<FacilityId, number> {
-  const builtFacilities = new Map<FacilityId, number>();
-  for (const f of gameState.facilities ?? []) {
-    if (!f.build_complete_at || f.build_complete_at <= Date.now()) {
-      builtFacilities.set(f.facility_id as FacilityId, f.level);
-    }
-  }
-  return builtFacilities;
-}
-
 /** 現在の本拠地グリッドサイズを取得（施設ボーナス込み） */
 function getHomeGridSize(): number {
-  return calculateFacilityBonuses(getBuiltFacilitiesMap()).homeSize;
+  return getHomeGridSizeForState(gameState);
 }
 
 /** 現在の本拠地拡張レベルを取得 */
 function getExpansionLevel(): number {
-  return calculateFacilityBonuses(getBuiltFacilitiesMap()).expansionLevel;
+  return getExpansionLevelForState(gameState);
 }
 
 export function createHomeElement(): HTMLDivElement {
@@ -136,18 +135,22 @@ function stopBuildingTimer(): void {
 }
 
 function checkBuildingCompletion(): void {
-  const facilities = gameState.facilities ?? [];
+  const facilities = getFacilitiesForState(gameState);
   const now = Date.now();
   let changed = false;
-
-  for (const facility of facilities) {
+  const nextFacilities = facilities.map((facility) => {
     if (facility.build_complete_at && facility.build_complete_at <= now) {
-      facility.build_complete_at = null;
       changed = true;
+      return {
+        ...facility,
+        build_complete_at: null,
+      };
     }
-  }
+    return facility;
+  });
 
   if (changed) {
+    replaceLocalPlayerState({ facilities: nextFacilities });
     renderFacilityPanel();
   }
 }
@@ -189,17 +192,9 @@ function hideBuildMenu(): void {
 }
 
 function renderHomeContent(): void {
-  const homeTroops = gameState.territories.find((t) => t.id === "c_24_24")?.troops ?? 0;
+  const homeTroops = gameState.territories.find((t) => t.id === `c_${HOME_COL}_${HOME_ROW}`)?.troops ?? 0;
   const totalEnergy = Array.from({ length: homeTroops }, (_, i) => bodyEnergies[i] ?? DEFAULT_BODY_ENERGY).reduce((a, b) => a + b, 0);
-
-  // 施設ボーナス計算
-  const builtFacilities = new Map<FacilityId, number>();
-  for (const f of gameState.facilities ?? []) {
-    if (!f.build_complete_at || f.build_complete_at <= Date.now()) {
-      builtFacilities.set(f.facility_id as FacilityId, f.level);
-    }
-  }
-  const bonuses = calculateFacilityBonuses(builtFacilities);
+  const bonuses = getFacilityBonusesForState(gameState);
 
   let header = homeEl.querySelector(".home-screen-header");
   if (!header) {
@@ -224,81 +219,82 @@ function renderHomeContent(): void {
   renderFacilityPanel();
 }
 
+function findBuiltFacility(
+  facilityId: FacilityId,
+  facilities: ReturnType<typeof getFacilitiesForState>,
+  tile: { col: number; row: number } | null,
+) {
+  return facilities.find((facility) => {
+    if (facility.facility_id !== facilityId) return false;
+    if (!tile) return true;
+    if (facility.position) {
+      return facility.position.col === tile.col && facility.position.row === tile.row;
+    }
+    return getHomeFacility(tile.col, tile.row) === facilityId;
+  });
+}
+
+function renderFacilityBuildButton(
+  facilityId: FacilityId,
+  level: number,
+  label: string,
+  enabled: boolean,
+): string {
+  return `<button type="button" class="facility-build-btn" data-facility="${facilityId}" data-level="${level}" ${enabled ? "" : "disabled"}>${label}</button>`;
+}
+
 function renderFacilityPanel(): void {
-  const inventory = gameState.inventory ?? [];
-  const facilities = gameState.facilities ?? [];
+  const inventory = getInventoryForState(gameState);
+  const facilities = getFacilitiesForState(gameState);
   const expansionLevel = getExpansionLevel();
 
-  // マス未選択時はパネルを非表示
   if (!selectedTile) {
     facilityPanelEl.style.display = "none";
     return;
   }
   facilityPanelEl.style.display = "";
 
-  // 城マス選択時：本拠地拡張パネルのみ表示
   if (isCastleTile(selectedTile.col, selectedTile.row)) {
-    const f = getHomeExpansionFacility();
-    if (!f) {
-      facilityPanelEl.innerHTML = `
-        <div class="facility-panel-header">
-          <h2>🏰 城</h2>
-          <div class="selected-tile-info">本拠地の中心
-            <button type="button" class="deselect-tile-btn">✕</button>
-          </div>
-        </div>
-      `;
+    const facility = getHomeExpansionFacility();
+    if (!facility) {
+      facilityPanelEl.innerHTML = renderPanelHeader({
+        title: "🏰 城",
+        subtitle: "本拠地の中心",
+      });
     } else {
-      const built = facilities.find((b) => b.facility_id === f.id);
+      const built = facilities.find((entry) => entry.facility_id === facility.id);
       const currentLevel = built?.level ?? 0;
-      const isBuilding = built?.build_complete_at && built.build_complete_at > Date.now();
+      const isBuilding = !!(built?.build_complete_at && built.build_complete_at > Date.now());
       const nextLevel = currentLevel + 1;
-      const levelDef = f.levels[nextLevel - 1];
-      const canBuild = levelDef && canBuildFacility(f.id, nextLevel, inventory, expansionLevel);
-      const isMaxLevel = currentLevel >= f.maxLevel;
-      const isNewBuild = currentLevel === 0;
-      const canBuildNow = canBuild && !isBuilding;
+      const levelDef = facility.levels[nextLevel - 1];
+      const isMaxLevel = currentLevel >= facility.maxLevel;
+      const canBuildNow = !!(levelDef && canBuildFacility(facility.id, nextLevel, inventory, expansionLevel) && !isBuilding);
 
-      const cardHtml = `
-        <div class="facility-card ${isBuilding ? "is-building" : ""} ${isMaxLevel ? "is-max" : ""}">
-          <div class="facility-icon">${f.icon}</div>
-          <div class="facility-info">
-            <div class="facility-name">${f.name}</div>
-            <div class="facility-level">Lv.${currentLevel}${isMaxLevel ? " (MAX)" : ""}</div>
-            <div class="facility-desc">${f.description}</div>
-            ${isBuilding && built?.build_complete_at ? `
-              <div class="facility-building">
-                建設中 <span class="facility-building-time" data-complete-at="${built.build_complete_at}"></span>
-              </div>
-            ` : ""}
-            ${!isMaxLevel && levelDef ? `
-              <div class="facility-next">
-                <div class="next-effect">${levelDef.description}</div>
-                <div class="next-cost">
-                  ${levelDef.cost
-                    .map((c) => {
-                      const item = getItem(c.itemId);
-                      const have = getItemCount(inventory, c.itemId);
-                      const enough = have >= c.count;
-                      return `<span class="cost-item ${enough ? "" : "not-enough"}">${item?.icon ?? "?"}${have}/${c.count}</span>`;
-                    })
-                    .join("")}
-                </div>
-                <button type="button" class="facility-build-btn" data-facility="${f.id}" data-level="${nextLevel}" ${canBuildNow ? "" : "disabled"}>
-                  ${isBuilding ? "建設中" : isNewBuild ? "拡張" : "レベルアップ"}
-                </button>
-              </div>
-            ` : ""}
-          </div>
-        </div>
-      `;
+      const cardHtml = renderFacilityCard({
+        icon: facility.icon,
+        name: facility.name,
+        description: facility.description,
+        currentLevel,
+        isBuilding,
+        isMaxLevel,
+        buildCompleteAt: built?.build_complete_at,
+        nextEffectHtml: !isMaxLevel && levelDef ? levelDef.description : undefined,
+        costHtml: !isMaxLevel && levelDef ? renderFacilityCosts(levelDef.cost, inventory) : undefined,
+        buttonHtml: !isMaxLevel && levelDef
+          ? renderFacilityBuildButton(
+              facility.id,
+              nextLevel,
+              isBuilding ? "建設中" : currentLevel === 0 ? "拡張" : "レベルアップ",
+              canBuildNow,
+            )
+          : undefined,
+      });
+
       facilityPanelEl.innerHTML = `
-        <div class="facility-panel-header">
-          <h2>🏰 城 — 本拠地拡張</h2>
-          <div class="selected-tile-info">本拠地の中心で領地を拡大
-            <button type="button" class="deselect-tile-btn">✕</button>
-          </div>
-        </div>
+        ${renderPanelHeader({
+          title: "🏰 城 — 本拠地拡張",
+          subtitle: "本拠地の中心で領地を拡大",
+        })}
         <div class="facility-list facility-list--expansion">
           ${cardHtml}
         </div>
@@ -309,65 +305,43 @@ function renderFacilityPanel(): void {
     return;
   }
 
-  // 施設があるマス選択時：その施設のレベルアップパネルのみ表示
   const tileFacilityId = getHomeFacility(selectedTile.col, selectedTile.row);
   if (tileFacilityId) {
-    const f = FACILITIES[tileFacilityId as FacilityId];
-    if (f) {
-      const built = facilities.find((b) => {
-        if (b.facility_id !== f.id) return false;
-        if (b.position)
-          return b.position.col === selectedTile!.col && b.position.row === selectedTile!.row;
-        return true;
-      });
+    const facility = FACILITIES[tileFacilityId as FacilityId];
+    if (facility) {
+      const built = findBuiltFacility(facility.id, facilities, selectedTile);
       const currentLevel = built?.level ?? 0;
-      const isBuilding = built?.build_complete_at && built.build_complete_at > Date.now();
+      const isBuilding = !!(built?.build_complete_at && built.build_complete_at > Date.now());
       const nextLevel = currentLevel + 1;
-      const levelDef = f.levels[nextLevel - 1];
-      const canBuild = levelDef && canBuildFacility(f.id, nextLevel, inventory, expansionLevel);
-      const isMaxLevel = currentLevel >= f.maxLevel;
-      const canBuildNow = canBuild && !isBuilding;
+      const levelDef = facility.levels[nextLevel - 1];
+      const isMaxLevel = currentLevel >= facility.maxLevel;
+      const canBuildNow = !!(levelDef && canBuildFacility(facility.id, nextLevel, inventory, expansionLevel) && !isBuilding);
 
-      const cardHtml = `
-        <div class="facility-card ${isBuilding ? "is-building" : ""} ${isMaxLevel ? "is-max" : ""}">
-          <div class="facility-icon">${f.icon}</div>
-          <div class="facility-info">
-            <div class="facility-name">${f.name}</div>
-            <div class="facility-level">Lv.${currentLevel}${isMaxLevel ? " (MAX)" : ""}</div>
-            <div class="facility-desc">${f.description}</div>
-            ${isBuilding && built?.build_complete_at ? `
-              <div class="facility-building">
-                建設中 <span class="facility-building-time" data-complete-at="${built.build_complete_at}"></span>
-              </div>
-            ` : ""}
-            ${!isMaxLevel && levelDef ? `
-              <div class="facility-next">
-                <div class="next-effect">${levelDef.description}</div>
-                <div class="next-cost">
-                  ${levelDef.cost
-                    .map((c) => {
-                      const item = getItem(c.itemId);
-                      const have = getItemCount(inventory, c.itemId);
-                      const enough = have >= c.count;
-                      return `<span class="cost-item ${enough ? "" : "not-enough"}">${item?.icon ?? "?"}${have}/${c.count}</span>`;
-                    })
-                    .join("")}
-                </div>
-                <button type="button" class="facility-build-btn" data-facility="${f.id}" data-level="${nextLevel}" ${canBuildNow ? "" : "disabled"}>
-                  ${isBuilding ? "建設中" : "レベルアップ"}
-                </button>
-              </div>
-            ` : ""}
-          </div>
-        </div>
-      `;
+      const cardHtml = renderFacilityCard({
+        icon: facility.icon,
+        name: facility.name,
+        description: facility.description,
+        currentLevel,
+        isBuilding,
+        isMaxLevel,
+        buildCompleteAt: built?.build_complete_at,
+        nextEffectHtml: !isMaxLevel && levelDef ? levelDef.description : undefined,
+        costHtml: !isMaxLevel && levelDef ? renderFacilityCosts(levelDef.cost, inventory) : undefined,
+        buttonHtml: !isMaxLevel && levelDef
+          ? renderFacilityBuildButton(
+              facility.id,
+              nextLevel,
+              isBuilding ? "建設中" : "レベルアップ",
+              canBuildNow,
+            )
+          : undefined,
+      });
+
       facilityPanelEl.innerHTML = `
-        <div class="facility-panel-header">
-          <h2>施設レベルアップ</h2>
-          <div class="selected-tile-info">📍 (${selectedTile.col - 21}, ${selectedTile.row - 21}) の ${f.name}
-            <button type="button" class="deselect-tile-btn">✕</button>
-          </div>
-        </div>
+        ${renderPanelHeader({
+          title: "施設レベルアップ",
+          subtitle: `📍 (${selectedTile.col - 21}, ${selectedTile.row - 21}) の ${facility.name}`,
+        })}
         <div class="facility-list facility-list--expansion">
           ${cardHtml}
         </div>
@@ -378,81 +352,62 @@ function renderFacilityPanel(): void {
     }
   }
 
-  // 空きマス選択時：未建設の施設のみ表示
   const categoryFacilities = getFacilitiesByCategory(selectedCategory).filter(
-    (f) => !facilities.some((b) => b.facility_id === f.id)
+    (facility) => !facilities.some((builtFacility) => builtFacility.facility_id === facility.id),
   );
+  const categoryButtonsHtml = FACILITY_CATEGORIES.map((category) => `
+    <button type="button" class="facility-category-btn ${category.id === selectedCategory ? "is-active" : ""}" data-category="${category.id}">
+      <span class="cat-icon">${category.icon}</span>
+      <span class="cat-name">${category.name}</span>
+    </button>
+  `).join("");
+
+  const cardsHtml = categoryFacilities.map((facility) => {
+    const built = findBuiltFacility(facility.id, facilities, selectedTile);
+    const currentLevel = built?.level ?? 0;
+    const isBuilding = !!(built?.build_complete_at && built.build_complete_at > Date.now());
+    const nextLevel = currentLevel + 1;
+    const levelDef = facility.levels[nextLevel - 1];
+    const meetsRequirement = meetsExpansionRequirement(facility.id, expansionLevel);
+    const isMaxLevel = currentLevel >= facility.maxLevel;
+    const canBuildNow = !!(levelDef && canBuildFacility(facility.id, nextLevel, inventory, expansionLevel) && !isBuilding);
+    const requiredExpLevel = facility.requiredExpansionLevel ?? 0;
+
+    return renderFacilityCard({
+      icon: facility.icon,
+      name: facility.name,
+      description: facility.description,
+      currentLevel,
+      isBuilding,
+      isMaxLevel,
+      buildCompleteAt: built?.build_complete_at,
+      nextEffectHtml: meetsRequirement && !isMaxLevel && levelDef ? levelDef.description : undefined,
+      costHtml: meetsRequirement && !isMaxLevel && levelDef ? renderFacilityCosts(levelDef.cost, inventory) : undefined,
+      buttonHtml: meetsRequirement && !isMaxLevel && levelDef
+        ? renderFacilityBuildButton(
+            facility.id,
+            nextLevel,
+            isBuilding ? "建設中" : currentLevel === 0 ? "建設" : "レベルアップ",
+            canBuildNow,
+          )
+        : undefined,
+      extraClasses: !meetsRequirement ? ["is-locked"] : [],
+    }).replace(
+      '<div class="facility-desc">',
+      `${!meetsRequirement ? `<div class="facility-locked">🔒 本拠地拡張 Lv.${requiredExpLevel} 必要</div>` : ""}<div class="facility-desc">`,
+    );
+  }).join("");
+
   facilityPanelEl.innerHTML = `
-    <div class="facility-panel-header">
-      <h2>施設建設</h2>
-      <div class="selected-tile-info">📍 (${selectedTile.col - 21}, ${selectedTile.row - 21}) を選択中
-        <button type="button" class="deselect-tile-btn">✕</button>
-      </div>
-    </div>
+    ${renderPanelHeader({
+      title: "施設建設",
+      subtitle: `📍 (${selectedTile.col - 21}, ${selectedTile.row - 21}) を選択中`,
+    })}
     <div class="facility-categories">
-      ${FACILITY_CATEGORIES.map(cat => `
-        <button type="button" class="facility-category-btn ${cat.id === selectedCategory ? 'is-active' : ''}" data-category="${cat.id}">
-          <span class="cat-icon">${cat.icon}</span>
-          <span class="cat-name">${cat.name}</span>
-        </button>
-      `).join("")}
+      ${categoryButtonsHtml}
     </div>
     <div class="facility-list">
-      ${categoryFacilities.map(f => {
-        const built = facilities.find((b) => {
-          if (b.facility_id !== f.id) return false;
-          if (b.position)
-            return b.position.col === selectedTile!.col && b.position.row === selectedTile!.row;
-          return getHomeFacility(selectedTile!.col, selectedTile!.row) === f.id;
-        });
-        const currentLevel = built?.level ?? 0;
-        const isBuilding = built?.build_complete_at && built.build_complete_at > Date.now();
-        const nextLevel = currentLevel + 1;
-        const levelDef = f.levels[nextLevel - 1];
-        const meetsRequirement = meetsExpansionRequirement(f.id, expansionLevel);
-        const canBuild = levelDef && canBuildFacility(f.id, nextLevel, inventory, expansionLevel);
-        const isMaxLevel = currentLevel >= f.maxLevel;
-        const isNewBuild = currentLevel === 0;
-        const canBuildNow = canBuild && !isBuilding;
-        const requiredExpLevel = f.requiredExpansionLevel ?? 0;
-
-        return `
-          <div class="facility-card ${isBuilding ? 'is-building' : ''} ${isMaxLevel ? 'is-max' : ''} ${!meetsRequirement ? 'is-locked' : ''}">
-            <div class="facility-icon">${f.icon}</div>
-            <div class="facility-info">
-              <div class="facility-name">${f.name}</div>
-              <div class="facility-level">Lv.${currentLevel}${isMaxLevel ? ' (MAX)' : ''}</div>
-              <div class="facility-desc">${f.description}</div>
-              ${!meetsRequirement ? `
-                <div class="facility-locked">
-                  🔒 本拠地拡張 Lv.${requiredExpLevel} 必要
-                </div>
-              ` : ''}
-              ${isBuilding && built?.build_complete_at ? `
-                <div class="facility-building">
-                  建設中 <span class="facility-building-time" data-complete-at="${built.build_complete_at}"></span>
-                </div>
-              ` : ''}
-              ${meetsRequirement && !isMaxLevel && levelDef ? `
-                <div class="facility-next">
-                  <div class="next-effect">${levelDef.description}</div>
-                  <div class="next-cost">
-                    ${levelDef.cost.map(c => {
-                      const item = getItem(c.itemId);
-                      const have = getItemCount(inventory, c.itemId);
-                      const enough = have >= c.count;
-                      return `<span class="cost-item ${enough ? '' : 'not-enough'}">${item?.icon ?? '?'}${have}/${c.count}</span>`;
-                    }).join("")}
-                  </div>
-                  <button type="button" class="facility-build-btn" data-facility="${f.id}" data-level="${nextLevel}" ${canBuildNow ? '' : 'disabled'}>
-                    ${isBuilding ? '建設中' : isNewBuild ? '建設' : 'レベルアップ'}
-                  </button>
-                </div>
-              ` : ''}
-            </div>
-          </div>
-        `;
-      }).join("")}
+      ${cardsHtml}
     </div>
   `;
 
@@ -487,83 +442,32 @@ function bindFacilityPanelListeners(): void {
 }
 
 function buildFacility(facilityId: FacilityId, level: number): void {
-  const isExpansion = facilityId === "home_expansion";
-  const existingFacilities = gameState.facilities ?? [];
-
-  // 本拠地拡張以外は新規建設（Lv1）でタイル選択が必要
-  if (!isExpansion && level === 1 && !selectedTile) return;
-  // 本拠地拡張は城マス選択時のみ
-  if (isExpansion && (!selectedTile || !isCastleTile(selectedTile.col, selectedTile.row))) return;
-
-  // 施設は1種類1個まで。新規建設時は既存チェック
-  if (level === 1 && existingFacilities.some((b) => b.facility_id === facilityId)) return;
-
-  const facility = FACILITIES[facilityId];
-  if (!facility) return;
-
-  const levelDef = facility.levels[level - 1];
-  if (!levelDef) return;
-
-  const inventory = gameState.inventory ?? [];
-  const expansionLevel = getExpansionLevel();
-  if (!canBuildFacility(facilityId, level, inventory, expansionLevel)) return;
-
-  // インベントリから素材を消費（ローカル更新）
-  const newInventory = [...inventory];
-  for (const cost of levelDef.cost) {
-    const idx = newInventory.findIndex(i => i.item_id === cost.itemId);
-    if (idx >= 0) {
-      newInventory[idx] = {
-        ...newInventory[idx],
-        count: newInventory[idx].count - cost.count,
-      };
-      if (newInventory[idx].count <= 0) {
-        newInventory.splice(idx, 1);
-      }
-    }
-  }
-
-  // 施設を追加/更新
-  const facilities = [...existingFacilities];
-  const existingIdx = facilities.findIndex((f) => {
-    if (f.facility_id !== facilityId) return false;
-    if (isExpansion) return true;
-    if (!selectedTile) return true;
-    if (f.position)
-      return f.position.col === selectedTile.col && f.position.row === selectedTile.row;
-    return getHomeFacility(selectedTile.col, selectedTile.row) === facilityId;
+  const result = createFacilityBuildState({
+    facilityId,
+    level,
+    selectedTile,
+    existingFacilities: getFacilitiesForState(gameState),
+    inventory: getInventoryForState(gameState),
+    expansionLevel: getExpansionLevel(),
+    getHomeFacility,
+    isCastleTile,
+    devMode: DEV_MODE,
+    devBuildTimeSeconds: DEV_BUILD_TIME_SECONDS,
   });
-  const buildTimeSeconds = DEV_MODE ? DEV_BUILD_TIME_SECONDS : levelDef.buildTime;
-  const buildCompleteAt = Date.now() + buildTimeSeconds * 1000;
+  if (!result) return;
 
-  if (existingIdx >= 0) {
-    // 既存施設のレベルアップ
-    facilities[existingIdx] = {
-      ...facilities[existingIdx],
-      level,
-      build_complete_at: buildCompleteAt,
-    };
-  } else {
-    // 新規建設 - 本拠地拡張はマスに配置しない（城専用）
-    const position = !isExpansion && selectedTile
-      ? { col: selectedTile.col, row: selectedTile.row }
-      : undefined;
-    facilities.push({
-      facility_id: facilityId,
-      level,
-      build_complete_at: buildCompleteAt,
-      position,
-    });
-
-    // ホームマップにも反映（本拠地拡張は城マスに建物表示しない）
-    if (!isExpansion && selectedTile) {
-      setHomeFacility(selectedTile.col, selectedTile.row, facilityId);
-    }
+  if (result.placedFacility) {
+    setHomeFacility(
+      result.placedFacility.col,
+      result.placedFacility.row,
+      result.placedFacility.facilityId,
+    );
   }
 
-  // ローカル状態更新
-  gameState.inventory = newInventory;
-  gameState.facilities = facilities;
+  replaceLocalPlayerState({
+    inventory: result.inventory,
+    facilities: result.facilities,
+  });
 
   // 選択解除
   selectedTile = null;

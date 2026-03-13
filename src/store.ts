@@ -3,14 +3,11 @@
  * 各モジュールはここから import して参照・更新する。循環依存を防ぐ。
  */
 
+import { USE_MOCK_STATE } from "./config";
 import type { GameState, Territory } from "./shared/game-state";
 import { DEFAULT_GAME_STATE } from "./shared/game-state";
 import { getMockGameState } from "./shared/mock-state";
-
-/** 開発時のみ。true のとき DB/サーバーに繋がず仮マスデータで表示する */
-export const USE_MOCK_STATE = import.meta.env.VITE_USE_MOCK_STATE === "true";
-
-export const WS_URL = "ws://127.0.0.1:3000/ws";
+export { USE_MOCK_STATE, WS_URL } from "./config";
 
 // --- ゲーム状態 ---
 export let gameState: GameState = USE_MOCK_STATE ? getMockGameState() : DEFAULT_GAME_STATE;

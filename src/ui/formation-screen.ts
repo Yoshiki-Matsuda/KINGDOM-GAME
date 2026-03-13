@@ -7,14 +7,14 @@ import {
   bodyEnergies, bodySpeeds,
   formedUnitsList, setFormedUnitsList,
   getNextFormedUnitId,
-  render,
   gameState,
+  render,
 } from "../store";
-import { getBodyDisplayName, getCharacterIllustrationPath, getCharacterStats } from "../game/characters";
-import { getCharacterSkills } from "../game/skills";
+import { getBodyDisplayName, getCharacterIllustrationPath } from "../game/characters";
 import { getHomeTroops, validateFormedUnits, recalcUnitStats } from "../game/formation";
-import { calculateFacilityBonuses } from "../game/facilities";
-import type { FacilityId } from "../game/facilities";
+import { getUnitCapacity } from "../game/facility-selectors";
+import { buildFormationCardDetailHtml } from "../formation-card-detail";
+import { appendFormedUnit } from "../store-actions";
 import { escapeHtml } from "../utils";
 
 let formationEl: HTMLDivElement;
@@ -24,22 +24,9 @@ let characterPickerEl: HTMLDivElement;
 let editingUnitId: string | null = null;
 let editingSlotIndex: 0 | 1 | 2 | null = null;
 
-
-/** 建設済み施設を取得 */
-function getBuiltFacilitiesMap(): Map<FacilityId, number> {
-  const built = new Map<FacilityId, number>();
-  for (const f of gameState.facilities ?? []) {
-    if (!f.build_complete_at || f.build_complete_at <= Date.now()) {
-      built.set(f.facility_id as FacilityId, f.level);
-    }
-  }
-  return built;
-}
-
 /** ユニット上限（施設ボーナス込み） */
 function getMaxUnits(): number {
-  const bonuses = calculateFacilityBonuses(getBuiltFacilitiesMap());
-  return Math.max(1, 1 + bonuses.unitCapacity);
+  return Math.max(1, 1 + getUnitCapacity(gameState));
 }
 
 export function createFormationElement(): HTMLDivElement {
@@ -120,30 +107,7 @@ const CARD_DETAIL_CLOSE_DELAY_MS = 800;
 function showCardDetail(charIndex: number): void {
   const cardDetailEl = formationEl.querySelector(".formation-card-detail-overlay")!;
   const contentEl = cardDetailEl.querySelector("[data-card-detail-content]")!;
-  const stats = getCharacterStats(charIndex);
-  const skills = getCharacterSkills(charIndex);
-
-  const skillLines: string[] = [];
-  if (skills.passive) skillLines.push(`[P] ${skills.passive.name}: ${skills.passive.description}`);
-  skillLines.push(`[A] ${skills.active.name}: ${skills.active.description}`);
-  if (skills.unique) skillLines.push(`[U] ${skills.unique.name}: ${skills.unique.description}`);
-
-  contentEl.innerHTML = `
-    <div class="formation-card-detail-header">
-      <img src="${getCharacterIllustrationPath(charIndex)}" alt="${escapeHtml(getBodyDisplayName(charIndex))}" class="formation-card-detail-img" />
-      <div class="formation-card-detail-name">${escapeHtml(getBodyDisplayName(charIndex))}</div>
-    </div>
-    <div class="formation-card-detail-stats">
-      <div>エナジー: ${stats.energy}</div>
-      <div>SPEED: ${stats.speed}</div>
-      <div>攻撃: ${stats.attack} / 魔力: ${stats.magic}</div>
-      <div>防御: ${stats.defense} / 魔防: ${stats.magicDefense}</div>
-    </div>
-    <div class="formation-card-detail-skills">
-      <div class="formation-card-detail-skills-title">スキル</div>
-      ${skillLines.map((s) => `<div class="formation-card-detail-skill">${escapeHtml(s)}</div>`).join("")}
-    </div>
-  `;
+  contentEl.innerHTML = buildFormationCardDetailHtml(charIndex);
   cardDetailEl.classList.add("is-open");
   cardDetailOpenedAt = Date.now();
 }
@@ -255,14 +219,13 @@ function setupFormationScreen(): void {
     if (formedUnitsList.length >= getMaxUnits()) return;
     const id = `unit-${getNextFormedUnitId()}`;
     const name = `ユニット${formedUnitsList.length + 1}`;
-    formedUnitsList.push({
+    appendFormedUnit({
       id,
       name,
       indices: [-1, -1, -1],
       energy: 0,
       avgSpeed: 0,
     });
-    setFormedUnitsList([...formedUnitsList]);
     renderFormationContent();
   });
 

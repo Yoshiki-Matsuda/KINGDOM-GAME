@@ -8,16 +8,26 @@ import {
     FederatedPointerEvent,
 } from "pixi.js";
 import type { GameState } from "./store";
+import {
+    GRID_COLS,
+    GRID_ROWS,
+    HOME_TERRITORY_ID,
+    formatTerritoryId,
+    isWithinWorldGrid,
+} from "./game/territories";
+import {
+    coordToScreen,
+    diamondPoints,
+    screenToCoord,
+} from "./map-isometric";
 import { formatTimeHHMMSS } from "./utils";
-
-export const GRID_COLS = 48;
-export const GRID_ROWS = 48;
-export const HOME_TERRITORY_ID = "c_24_24";
+export { GRID_COLS, GRID_ROWS, HOME_TERRITORY_ID, parseTerritoryId } from "./game/territories";
 
 // アイソメトリック: マスは◇型。45度回転して斜め上から見下ろす視点
 // タイルの幅・高さ（◇の横・縦の長さ）
 const TILE_WIDTH = 56;
 const TILE_HEIGHT = 28;
+const TILE_DIMENSIONS = { width: TILE_WIDTH, height: TILE_HEIGHT } as const;
 
 // 地形テクスチャキャッシュ (level 1-6 に対応)
 const TERRAIN_TEXTURES: (Texture | null)[] = [null, null, null, null, null, null];
@@ -78,35 +88,6 @@ let _tileContainer: Container | null = null;
 let _onTerritoryClick: ((id: string, t: any, x: number, y: number) => void) | null = null;
 let _lastTerritoryMap: Map<string, any> = new Map();
 
-/** グリッド座標 → アイソメトリック画面座標（タイル中心） */
-function coordToScreen(col: number, row: number): { x: number; y: number } {
-    return {
-        x: (col - row) * (TILE_WIDTH / 2),
-        y: (col + row) * (TILE_HEIGHT / 2),
-    };
-}
-
-/** 画面座標 → グリッド座標（逆変換） */
-function screenToCoord(screenX: number, screenY: number): { col: number; row: number } {
-    const halfW = TILE_WIDTH / 2;
-    const halfH = TILE_HEIGHT / 2;
-    const col = (screenX / halfW + screenY / halfH) / 2;
-    const row = (screenY / halfH - screenX / halfW) / 2;
-    return { col: Math.round(col), row: Math.round(row) };
-}
-
-/** ◇の4頂点を返す（中心 cx, cy） */
-function diamondPoints(cx: number, cy: number): number[] {
-    const hw = TILE_WIDTH / 2;
-    const hh = TILE_HEIGHT / 2;
-    return [
-        cx, cy - hh,      // 上
-        cx + hw, cy,      // 右
-        cx, cy + hh,      // 下
-        cx - hw, cy,      // 左
-    ];
-}
-
 /** 地形レベル（1-6）に対応する色（テクスチャがない時のフォールバック） */
 function terrainColor(level: number): number {
     switch (level) {
@@ -118,17 +99,6 @@ function terrainColor(level: number): number {
         case 6: return 0x4488cc; // 川
         default: return 0xcccccc;
     }
-}
-
-// Parse c_col_row
-export function parseTerritoryId(id: string): { col: number; row: number } {
-    if (id.startsWith("c_")) {
-        const parts = id.substring(2).split("_");
-        if (parts.length === 2) {
-            return { col: parseInt(parts[0], 10), row: parseInt(parts[1], 10) };
-        }
-    }
-    return { col: 0, row: 0 };
 }
 
 // level 1-6 → 地形ファイル名（平原・丘陵・森・山地・山岳・川）
@@ -185,7 +155,7 @@ export async function initMapView(
     _tileContainer.eventMode = "static";
 
     // アイソメトリックで中央(24,24)が画面中央に来るように
-    const centerScreen = coordToScreen(24, 24);
+    const centerScreen = coordToScreen(24, 24, TILE_DIMENSIONS);
     _tileContainer.x = app.screen.width / 2 - centerScreen.x;
     _tileContainer.y = app.screen.height / 2 - centerScreen.y;
 
@@ -246,10 +216,10 @@ export async function initMapView(
         const dist = Math.abs(e.global.x - clickStart.x) + Math.abs(e.global.y - clickStart.y);
         if (dist < 5 && _tileContainer) {
             const local = _tileContainer.toLocal(e.global);
-            const { col, row } = screenToCoord(local.x, local.y);
+            const { col, row } = screenToCoord(local.x, local.y, TILE_DIMENSIONS);
 
-            if (col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS) {
-                const id = `c_${col}_${row}`;
+            if (isWithinWorldGrid(col, row)) {
+                const id = formatTerritoryId(col, row);
                 const t = _lastTerritoryMap.get(id);
                 _onTerritoryClick?.(id, t, e.global.x, e.global.y);
             }
@@ -282,13 +252,13 @@ export function updateMapView(
     }
 
     for (const { col, row } of order) {
-        const id = `c_${col}_${row}`;
+        const id = formatTerritoryId(col, row);
         const t = _lastTerritoryMap.get(id);
         const level = t?.level ?? 1;
         const isRuin = !!t?.ruin;
 
-        const { x: cx, y: cy } = coordToScreen(col, row);
-        const points = diamondPoints(cx, cy);
+        const { x: cx, y: cy } = coordToScreen(col, row, TILE_DIMENSIONS);
+        const points = diamondPoints(cx, cy, TILE_DIMENSIONS);
 
         // 遺跡マスは専用の色を使用
         if (isRuin) {

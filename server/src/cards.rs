@@ -98,9 +98,20 @@ pub fn get_card(id: u32) -> Option<&'static CardDef> {
     CARDS.iter().find(|c| c.id == id)
 }
 
+fn normalize_card_name(name: &str) -> &str {
+    match name.trim_end_matches(|c| c == 'A' || c == 'B' || c == 'C') {
+        "カースドアーマー" => "呪われた鎧",
+        "フレイムスピリット" => "炎の精霊",
+        "アイスエレメンタル" => "氷の精霊",
+        "ポイズンスパイダー" => "毒蜘蛛",
+        normalized => normalized,
+    }
+}
+
 /// カード名からカード定義を取得
 pub fn get_card_by_name(name: &str) -> Option<&'static CardDef> {
-    CARDS.iter().find(|c| c.name == name)
+    let normalized = normalize_card_name(name);
+    CARDS.iter().find(|c| c.name == normalized)
 }
 
 /// カード名からカードIDを取得

@@ -3,7 +3,12 @@
  */
 
 import type { GameState, Territory } from "../store";
-import { GRID_COLS, GRID_ROWS, HOME_TERRITORY_ID, parseTerritoryId } from "../map-view";
+import {
+  GRID_COLS,
+  GRID_ROWS,
+  isHomeTerritoryId,
+  tryParseTerritoryId,
+} from "./territories";
 
 // --- Territory キャッシュ ---
 let cachedTerritoryAtMap: Map<string, string> | null = null;
@@ -15,7 +20,7 @@ function getTerritoryAtMap(state: GameState): Map<string, string> {
   }
   const m = new Map<string, string>();
   for (const t of state.territories) {
-    const p = parseTerritoryId(t.id);
+    const p = tryParseTerritoryId(t.id);
     if (p) m.set(`${p.col},${p.row}`, t.id);
   }
   cachedTerritoryAtMap = m;
@@ -37,7 +42,7 @@ export function isAttackable(state: GameState, targetId: string): boolean {
 
 /** 攻撃先に隣接する自領を1つ返す（攻撃元の自動選択用） */
 export function getAdjacentAttackSource(state: GameState, targetId: string): string | null {
-  const pos = parseTerritoryId(targetId);
+  const pos = tryParseTerritoryId(targetId);
   if (!pos) return null;
   const { col, row } = pos;
   const territoryAt = getTerritoryAtMap(state);
@@ -59,5 +64,5 @@ export function getAdjacentAttackSource(state: GameState, targetId: string): str
 
 /** 本拠地は常に c_24_24 固定 */
 export function isHomeTerritory(id: string): boolean {
-  return id === HOME_TERRITORY_ID;
+  return isHomeTerritoryId(id);
 }

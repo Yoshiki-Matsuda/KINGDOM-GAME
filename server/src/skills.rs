@@ -1312,6 +1312,29 @@ pub fn should_trigger_skill(probability: u8) -> bool {
     rng.gen_range(0..100) < probability
 }
 
+fn get_triggered_skill(skill_id: &str, timing: SkillTiming) -> Option<Skill> {
+    let skill = get_skill(skill_id)?;
+    if skill.timing == timing && should_trigger_skill(skill.probability) {
+        Some(skill)
+    } else {
+        None
+    }
+}
+
+fn log_skill_trigger(
+    log: &mut Vec<String>,
+    prefix: &str,
+    character_name: &str,
+    skill_name: &str,
+    is_unique: bool,
+) {
+    if is_unique {
+        log.push(format!("{} {}の固有スキル「{}」が発動！", prefix, character_name, skill_name));
+    } else {
+        log.push(format!("{} {}の「{}」が発動！", prefix, character_name, skill_name));
+    }
+}
+
 /// 戦闘開始時のパッシブスキル適用
 pub fn apply_battle_start_skills(
     characters: &mut [CombatCharacter],
@@ -1324,22 +1347,18 @@ pub fn apply_battle_start_skills(
 
     for (char_idx, passive_id, unique_id) in skill_ids {
         if let Some(id) = passive_id {
-            if let Some(skill) = get_skill(&id) {
-                if skill.timing == SkillTiming::BattleStart && should_trigger_skill(skill.probability) {
-                    let char_name = characters.iter().find(|c| c.index == char_idx).map(|c| c.name.clone()).unwrap_or_default();
-                    log.push(format!("◆ {}の「{}」が発動！", char_name, skill.name));
-                    apply_skill_effects(&skill, char_idx, characters, log);
-                }
+            if let Some(skill) = get_triggered_skill(&id, SkillTiming::BattleStart) {
+                let char_name = characters.iter().find(|c| c.index == char_idx).map(|c| c.name.clone()).unwrap_or_default();
+                log_skill_trigger(log, "◆", &char_name, &skill.name, false);
+                apply_skill_effects(&skill, char_idx, characters, log);
             }
         }
 
         if let Some(id) = unique_id {
-            if let Some(skill) = get_skill(&id) {
-                if skill.timing == SkillTiming::BattleStart && should_trigger_skill(skill.probability) {
-                    let char_name = characters.iter().find(|c| c.index == char_idx).map(|c| c.name.clone()).unwrap_or_default();
-                    log.push(format!("◆◆ {}の固有スキル「{}」が発動！", char_name, skill.name));
-                    apply_skill_effects(&skill, char_idx, characters, log);
-                }
+            if let Some(skill) = get_triggered_skill(&id, SkillTiming::BattleStart) {
+                let char_name = characters.iter().find(|c| c.index == char_idx).map(|c| c.name.clone()).unwrap_or_default();
+                log_skill_trigger(log, "◆◆", &char_name, &skill.name, true);
+                apply_skill_effects(&skill, char_idx, characters, log);
             }
         }
     }
@@ -1352,22 +1371,18 @@ pub fn apply_attack_skills(
 ) -> AttackModifiers {
     let mut modifiers = AttackModifiers::default();
 
-    if let Some(skill) = get_skill(&attacker.skills.active_id) {
-        if skill.timing == SkillTiming::OnAttack && should_trigger_skill(skill.probability) {
-            log.push(format!("★ {}の「{}」が発動！", attacker.name, skill.name));
-            for effect in &skill.effects {
-                apply_attack_effect(effect, attacker, &mut modifiers, log);
-            }
+    if let Some(skill) = get_triggered_skill(&attacker.skills.active_id, SkillTiming::OnAttack) {
+        log_skill_trigger(log, "★", &attacker.name, &skill.name, false);
+        for effect in &skill.effects {
+            apply_attack_effect(effect, attacker, &mut modifiers, log);
         }
     }
 
     if let Some(ref unique_id) = attacker.skills.unique_id {
-        if let Some(skill) = get_skill(unique_id) {
-            if skill.timing == SkillTiming::OnAttack && should_trigger_skill(skill.probability) {
-                log.push(format!("★★ {}の固有スキル「{}」が発動！", attacker.name, skill.name));
-                for effect in &skill.effects {
-                    apply_attack_effect(effect, attacker, &mut modifiers, log);
-                }
+        if let Some(skill) = get_triggered_skill(unique_id, SkillTiming::OnAttack) {
+            log_skill_trigger(log, "★★", &attacker.name, &skill.name, true);
+            for effect in &skill.effects {
+                apply_attack_effect(effect, attacker, &mut modifiers, log);
             }
         }
     }
@@ -1757,20 +1772,18 @@ pub fn check_death_skills(
     log: &mut Vec<String>,
 ) -> bool {
     if let Some(ref unique_id) = character.skills.unique_id {
-        if let Some(skill) = get_skill(unique_id) {
-            if skill.timing == SkillTiming::OnDeath && should_trigger_skill(skill.probability) {
-                for effect in &skill.effects {
-                    if effect.effect_type == SkillEffectType::Revive {
-                        character.current_energy = character.base_energy as f32 * effect.value;
-                        character.is_alive = true;
-                        log.push(format!(
-                            "{}の「{}」が発動！エナジー{}で復活！",
-                            character.name,
-                            skill.name,
-                            character.effective_energy()
-                        ));
-                        return true;
-                    }
+        if let Some(skill) = get_triggered_skill(unique_id, SkillTiming::OnDeath) {
+            for effect in &skill.effects {
+                if effect.effect_type == SkillEffectType::Revive {
+                    character.current_energy = character.base_energy as f32 * effect.value;
+                    character.is_alive = true;
+                    log.push(format!(
+                        "{}の「{}」が発動！エナジー{}で復活！",
+                        character.name,
+                        skill.name,
+                        character.effective_energy()
+                    ));
+                    return true;
                 }
             }
         }

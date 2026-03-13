@@ -2,7 +2,6 @@
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use crate::skills::SkillData;
 
 /// 遺跡敵のタイプ
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,11 +69,8 @@ impl RuinEnemyType {
 
 /// 遺跡敵キャラクター定義
 pub struct RuinEnemyDef {
-    pub enemy_type: RuinEnemyType,
     pub name: &'static str,
     pub energy: u32,
-    pub speed: u32,
-    pub skills: SkillData,
 }
 
 /// 遺跡敵の定義を取得
@@ -82,103 +78,79 @@ pub fn get_ruin_enemy(enemy_type: RuinEnemyType) -> RuinEnemyDef {
     match enemy_type {
         // 基本敵
         RuinEnemyType::Golem => RuinEnemyDef {
-            enemy_type, name: "ゴーレム", energy: 15, speed: 3,
-            skills: SkillData { passive_id: Some("stone_guard".into()), active_id: "heavy_strike".into(), unique_id: None },
+            name: "ゴーレム", energy: 15,
         },
         RuinEnemyType::Phantom => RuinEnemyDef {
-            enemy_type, name: "ファントム", energy: 8, speed: 8,
-            skills: SkillData { passive_id: Some("ethereal".into()), active_id: "soul_drain".into(), unique_id: None },
+            name: "ファントム", energy: 8,
         },
         RuinEnemyType::SkeletonKnight => RuinEnemyDef {
-            enemy_type, name: "スケルトンナイト", energy: 10, speed: 5,
-            skills: SkillData { passive_id: Some("bone_counter".into()), active_id: "sword_slash".into(), unique_id: None },
+            name: "スケルトンナイト", energy: 10,
         },
         RuinEnemyType::TreasureMimic => RuinEnemyDef {
-            enemy_type, name: "トレジャーミミック", energy: 5, speed: 6,
-            skills: SkillData { passive_id: Some("treasure_bearer".into()), active_id: "surprise_bite".into(), unique_id: None },
+            name: "トレジャーミミック", energy: 5,
         },
         RuinEnemyType::DarkWizard => RuinEnemyDef {
-            enemy_type, name: "ダークウィザード", energy: 12, speed: 4,
-            skills: SkillData { passive_id: Some("dark_curse".into()), active_id: "shadow_bolt".into(), unique_id: None },
+            name: "ダークウィザード", energy: 12,
         },
         // 追加敵（低〜中級）
         RuinEnemyType::SlimeKing => RuinEnemyDef {
-            enemy_type, name: "スライムキング", energy: 20, speed: 2,
-            skills: SkillData { passive_id: Some("split_on_death".into()), active_id: "acid_splash".into(), unique_id: None },
+            name: "スライムキング", energy: 20,
         },
         RuinEnemyType::CursedArmor => RuinEnemyDef {
-            enemy_type, name: "カースドアーマー", energy: 14, speed: 4,
-            skills: SkillData { passive_id: Some("cursed_shell".into()), active_id: "cursed_slash".into(), unique_id: None },
+            name: "カースドアーマー", energy: 14,
         },
         RuinEnemyType::ShadowAssassin => RuinEnemyDef {
-            enemy_type, name: "シャドウアサシン", energy: 7, speed: 10,
-            skills: SkillData { passive_id: Some("deadly_precision".into()), active_id: "backstab".into(), unique_id: None },
+            name: "シャドウアサシン", energy: 7,
         },
         RuinEnemyType::FlameSpirit => RuinEnemyDef {
-            enemy_type, name: "フレイムスピリット", energy: 9, speed: 7,
-            skills: SkillData { passive_id: Some("burning_aura".into()), active_id: "fireball".into(), unique_id: None },
+            name: "フレイムスピリット", energy: 9,
         },
         RuinEnemyType::IceElemental => RuinEnemyDef {
-            enemy_type, name: "アイスエレメンタル", energy: 11, speed: 5,
-            skills: SkillData { passive_id: Some("freezing_touch".into()), active_id: "ice_spike".into(), unique_id: None },
+            name: "アイスエレメンタル", energy: 11,
         },
         RuinEnemyType::PoisonSpider => RuinEnemyDef {
-            enemy_type, name: "ポイズンスパイダー", energy: 6, speed: 7,
-            skills: SkillData { passive_id: Some("venom_fangs".into()), active_id: "poison_bite".into(), unique_id: None },
+            name: "ポイズンスパイダー", energy: 6,
         },
         RuinEnemyType::StoneGargoyle => RuinEnemyDef {
-            enemy_type, name: "ストーンガーゴイル", energy: 13, speed: 6,
-            skills: SkillData { passive_id: Some("stone_skin".into()), active_id: "diving_strike".into(), unique_id: None },
+            name: "ストーンガーゴイル", energy: 13,
         },
         // 追加敵（中〜上級）
         RuinEnemyType::DeathKnight => RuinEnemyDef {
-            enemy_type, name: "デスナイト", energy: 18, speed: 4,
-            skills: SkillData { passive_id: Some("soul_harvest".into()), active_id: "death_strike".into(), unique_id: None },
+            name: "デスナイト", energy: 18,
         },
         RuinEnemyType::Necromancer => RuinEnemyDef {
-            enemy_type, name: "ネクロマンサー", energy: 10, speed: 3,
-            skills: SkillData { passive_id: Some("dark_ritual".into()), active_id: "raise_dead".into(), unique_id: None },
+            name: "ネクロマンサー", energy: 10,
         },
         RuinEnemyType::CrystalGolem => RuinEnemyDef {
-            enemy_type, name: "クリスタルゴーレム", energy: 22, speed: 2,
-            skills: SkillData { passive_id: Some("crystal_armor".into()), active_id: "crystal_smash".into(), unique_id: None },
+            name: "クリスタルゴーレム", energy: 22,
         },
         RuinEnemyType::ThunderHawk => RuinEnemyDef {
-            enemy_type, name: "サンダーホーク", energy: 8, speed: 12,
-            skills: SkillData { passive_id: Some("lightning_speed".into()), active_id: "thunder_dive".into(), unique_id: None },
+            name: "サンダーホーク", energy: 8,
         },
         RuinEnemyType::EarthWyrm => RuinEnemyDef {
-            enemy_type, name: "アースワーム", energy: 16, speed: 3,
-            skills: SkillData { passive_id: Some("earth_armor".into()), active_id: "earthquake".into(), unique_id: None },
+            name: "アースワーム", energy: 16,
         },
         RuinEnemyType::VoidStalker => RuinEnemyDef {
-            enemy_type, name: "ヴォイドストーカー", energy: 12, speed: 9,
-            skills: SkillData { passive_id: Some("void_cloak".into()), active_id: "silence_strike".into(), unique_id: None },
+            name: "ヴォイドストーカー", energy: 12,
         },
         RuinEnemyType::AncientMummy => RuinEnemyDef {
-            enemy_type, name: "エンシェントマミー", energy: 14, speed: 2,
-            skills: SkillData { passive_id: Some("ancient_curse".into()), active_id: "bandage_strangle".into(), unique_id: None },
+            name: "エンシェントマミー", energy: 14,
         },
         RuinEnemyType::DemonImp => RuinEnemyDef {
-            enemy_type, name: "デーモンインプ", energy: 6, speed: 8,
-            skills: SkillData { passive_id: Some("demonic_aura".into()), active_id: "chaos_bolt".into(), unique_id: None },
+            name: "デーモンインプ", energy: 6,
         },
         // ボス敵
         RuinEnemyType::RuinGuardian => RuinEnemyDef {
-            enemy_type, name: "遺跡の守護者", energy: 25, speed: 2,
-            skills: SkillData { passive_id: Some("ancient_power".into()), active_id: "devastating_blow".into(), unique_id: Some("guardian_wrath".into()) },
+            name: "遺跡の守護者", energy: 25,
         },
         RuinEnemyType::DragonZombie => RuinEnemyDef {
-            enemy_type, name: "ドラゴンゾンビ", energy: 30, speed: 3,
-            skills: SkillData { passive_id: Some("undead_dragon".into()), active_id: "death_breath".into(), unique_id: Some("resurrection".into()) },
+            name: "ドラゴンゾンビ", energy: 30,
         },
         RuinEnemyType::LichLord => RuinEnemyDef {
-            enemy_type, name: "リッチロード", energy: 20, speed: 5,
-            skills: SkillData { passive_id: Some("lord_of_undead".into()), active_id: "soul_rend".into(), unique_id: Some("death_sentence".into()) },
+            name: "リッチロード", energy: 20,
         },
         RuinEnemyType::TitanColossus => RuinEnemyDef {
-            enemy_type, name: "タイタンコロッサス", energy: 40, speed: 1,
-            skills: SkillData { passive_id: Some("titan_body".into()), active_id: "colossal_strike".into(), unique_id: Some("apocalypse".into()) },
+            name: "タイタンコロッサス", energy: 40,
         },
     }
 }

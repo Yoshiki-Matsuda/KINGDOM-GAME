@@ -13,39 +13,8 @@ import type { TravelingUnit } from "../store";
 import { attackAction, deployAction } from "../shared/game-state";
 import { BASE_TRAVEL_TIME_PER_TILE } from "./characters";
 
-// Local parsing helper to avoid dependency on potentially missing map-view.ts
-function parseTerritoryId(id: string): { col: number; row: number } | null {
-    if (id.startsWith("c_")) {
-        const parts = id.substring(2).split("_");
-        if (parts.length === 2) {
-            const col = parseInt(parts[0], 10);
-            const row = parseInt(parts[1], 10);
-            return { col, row };
-        }
-    }
-    const parts = id.split("-");
-    if (parts.length === 2) {
-        const col = parseInt(parts[0], 10);
-        const row = parseInt(parts[1], 10);
-        return { col, row };
-    }
-    return null;
-}
-
 /** 本拠地(24,24)から領地までのマンハッタン距離（マス数） */
-export function getDistanceFromHome(territoryId: string): number {
-    const p = parseTerritoryId(territoryId);
-    if (!p) return 0;
-    return Math.abs(p.col - 24) + Math.abs(p.row - 24);
-}
-
-/** 2領地間のマンハッタン距離（マス数） */
-export function getDistanceBetweenTerritories(fromId: string, toId: string): number {
-    const pFrom = parseTerritoryId(fromId);
-    const pTo = parseTerritoryId(toId);
-    if (!pFrom || !pTo) return 0;
-    return Math.abs(pFrom.col - pTo.col) + Math.abs(pFrom.row - pTo.row);
-}
+export { getDistanceBetweenTerritories, getDistanceFromHome } from "./territories";
 
 /** 移動時間（ミリ秒）。距離とユニット平均SPEEDから計算。SPEEDが高いほど短い */
 export function getTravelTimeMs(distance: number, avgSpeed: number): number {

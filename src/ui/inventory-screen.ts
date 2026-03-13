@@ -3,6 +3,7 @@
  */
 
 import { gameState } from "../store";
+import { getInventoryForState } from "../game/facility-selectors";
 import { getItem, getRarityColor } from "../game/items";
 
 let inventoryEl: HTMLDivElement;
@@ -42,7 +43,7 @@ export function createInventoryElement(): HTMLDivElement {
 }
 
 export function renderInventory(): void {
-  const inventory = gameState.inventory ?? [];
+  const inventory = getInventoryForState(gameState);
 
   // カテゴリでフィルタ
   const filtered = inventory.filter(item => {
