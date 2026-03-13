@@ -11,8 +11,6 @@ import {
 } from "../store";
 import { canReceiveReinforcement, isAttackable, getAdjacentAttackSource, isHomeTerritory } from "../game/combat";
 import { showUnitSelect } from "./unit-select";
-import { showFormationScreen } from "./formation-screen";
-import { showHomeScreen } from "./home-screen";
 
 let menuEl: HTMLDivElement;
 let ruinTimerId: number | null = null;
@@ -81,11 +79,10 @@ export function showMenuAt(x: number, y: number, territoryId: string, territory:
   const t = gameState.territories.find((x) => x.id === territoryId) ?? territory;
 
   if (isHomeTerritory(territoryId)) {
-    menuEl.innerHTML = `
-      <button type="button" data-action="enter">入る</button>
-      <button type="button" data-action="formation">編成</button>
-    `;
-  } else if (t.ruin) {
+    menuEl.hidden = true;
+    return;
+  }
+  if (t.ruin) {
     // 遺跡マス
     const ruin = t.ruin;
     const attackable = isAttackable(gameState, territoryId);
@@ -187,14 +184,5 @@ function onMenuClick(e: MouseEvent): void {
       render();
     }
     return;
-  }
-  if (action === "formation") {
-    closeMenu();
-    showFormationScreen();
-    return;
-  }
-  if (action === "enter") {
-    closeMenu();
-    showHomeScreen();
   }
 }

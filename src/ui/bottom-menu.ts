@@ -5,6 +5,7 @@
 import { setCurrentScreen, currentScreen, render } from "../store";
 import { showHomeScreen } from "./home-screen";
 import { showInventoryScreen } from "./inventory-screen";
+import { showFormationScreen } from "./formation-screen";
 
 let menuBar: HTMLDivElement;
 
@@ -16,6 +17,10 @@ export function createBottomMenuElement(): HTMLDivElement {
     <button class="bottom-menu-item" data-action="home" title="本拠地">
       <span class="bottom-menu-icon">🏠</span>
       <span class="bottom-menu-label">本拠地</span>
+    </button>
+    <button class="bottom-menu-item" data-action="formation" title="編成">
+      <span class="bottom-menu-icon">⚔️</span>
+      <span class="bottom-menu-label">編成</span>
     </button>
     <button class="bottom-menu-item" data-action="inventory" title="インベントリ">
       <span class="bottom-menu-icon">🎒</span>
@@ -40,6 +45,9 @@ export function createBottomMenuElement(): HTMLDivElement {
     switch (action) {
       case "home":
         showHomeScreen();
+        break;
+      case "formation":
+        showFormationScreen();
         break;
       case "inventory":
         setCurrentScreen("inventory");

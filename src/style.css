@@ -31,6 +31,11 @@ body {
   z-index: 0;
 }
 
+/* 編成画面・カード詳細表示中はマップのクリック判定を無効化 */
+#app:has(.formation-overlay.is-open) .map-container {
+  pointer-events: none;
+}
+
 .map-container canvas {
   display: block;
   width: 100%;
@@ -1264,6 +1269,107 @@ body {
 }
 
 .formation-char-picker-close:hover {
+  background: linear-gradient(180deg, #475569 0%, #334155 100%);
+}
+
+/* カード詳細ポップアップ（長押しで表示） */
+.formation-card-detail-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+}
+
+.formation-card-detail-overlay.is-open {
+  display: flex;
+}
+
+.formation-card-detail-modal {
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 14px;
+  padding: 1.5rem;
+  max-width: 90%;
+  max-height: 85%;
+  overflow-y: auto;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.formation-card-detail-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.formation-card-detail-img {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.formation-card-detail-name {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.formation-card-detail-stats {
+  font-size: 0.95rem;
+  color: #cbd5e1;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: rgba(51, 65, 85, 0.4);
+  border-radius: 10px;
+}
+
+.formation-card-detail-stats div {
+  margin-bottom: 0.25rem;
+}
+
+.formation-card-detail-skills {
+  margin-bottom: 1rem;
+}
+
+.formation-card-detail-skills-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+}
+
+.formation-card-detail-skill {
+  font-size: 0.85rem;
+  color: #e2e8f0;
+  line-height: 1.5;
+  margin-bottom: 0.35rem;
+}
+
+.formation-card-detail-close {
+  display: block;
+  width: 100%;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border: 1px solid rgba(71, 85, 105, 0.6);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+  color: #e2e8f0;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.formation-card-detail-close:hover {
   background: linear-gradient(180deg, #475569 0%, #334155 100%);
 }
 

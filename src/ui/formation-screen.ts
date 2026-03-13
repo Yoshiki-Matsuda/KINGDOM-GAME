@@ -10,7 +10,8 @@ import {
   render,
   gameState,
 } from "../store";
-import { getBodyDisplayName, getCharacterIllustrationPath } from "../game/characters";
+import { getBodyDisplayName, getCharacterIllustrationPath, getCharacterStats } from "../game/characters";
+import { getCharacterSkills } from "../game/skills";
 import { getHomeTroops, validateFormedUnits, recalcUnitStats } from "../game/formation";
 import { calculateFacilityBonuses } from "../game/facilities";
 import type { FacilityId } from "../game/facilities";
@@ -46,7 +47,7 @@ export function createFormationElement(): HTMLDivElement {
   formationEl.className = "formation-overlay";
   formationEl.innerHTML = `
     <div class="formation-modal">
-      <div class="formation-title">編成画面</div>
+      <div class="formation-title">ユニット編成</div>
       <div class="formation-desc">枠をクリックしてキャラを選択します</div>
       <div class="formation-troops" data-formation-troops>本拠地: 0 体</div>
       <div class="formation-unit-list" data-formation-unit-list></div>
@@ -59,12 +60,22 @@ export function createFormationElement(): HTMLDivElement {
   characterPickerEl.className = "formation-char-picker-overlay";
   characterPickerEl.innerHTML = `
     <div class="formation-char-picker-modal">
-      <div class="formation-char-picker-title">キャラを選択</div>
+      <div class="formation-char-picker-title">カード一覧</div>
       <div class="formation-char-picker-grid" data-char-picker-grid></div>
       <button type="button" class="formation-char-picker-close" data-char-picker-close>閉じる</button>
     </div>
   `;
   formationEl.appendChild(characterPickerEl);
+
+  const cardDetailEl = document.createElement("div");
+  cardDetailEl.className = "formation-card-detail-overlay";
+  cardDetailEl.innerHTML = `
+    <div class="formation-card-detail-modal">
+      <div class="formation-card-detail-content" data-card-detail-content></div>
+      <button type="button" class="formation-card-detail-close" data-card-detail-close>閉じる</button>
+    </div>
+  `;
+  formationEl.appendChild(cardDetailEl);
 
   setupFormationScreen();
   return formationEl;
@@ -76,6 +87,8 @@ export function showFormationScreen(): void {
   editingSlotIndex = null;
   formationEl.classList.add("is-open");
   characterPickerEl.classList.remove("is-open");
+  const mapContainer = document.querySelector<HTMLElement>(".map-container");
+  if (mapContainer) mapContainer.style.pointerEvents = "none";
   renderFormationContent();
   (formationEl.querySelector("[data-formation-close]") as HTMLElement)?.focus();
 }
@@ -83,6 +96,9 @@ export function showFormationScreen(): void {
 export function closeFormationScreen(): void {
   formationEl.classList.remove("is-open");
   characterPickerEl.classList.remove("is-open");
+  closeCardDetail();
+  const mapContainer = document.querySelector<HTMLElement>(".map-container");
+  if (mapContainer) mapContainer.style.pointerEvents = "";
 }
 
 function openCharacterPicker(unitId: string, slotIndex: 0 | 1 | 2): void {
@@ -96,6 +112,44 @@ function closeCharacterPicker(): void {
   editingUnitId = null;
   editingSlotIndex = null;
   characterPickerEl.classList.remove("is-open");
+}
+
+let cardDetailOpenedAt = 0;
+const CARD_DETAIL_CLOSE_DELAY_MS = 800;
+
+function showCardDetail(charIndex: number): void {
+  const cardDetailEl = formationEl.querySelector(".formation-card-detail-overlay")!;
+  const contentEl = cardDetailEl.querySelector("[data-card-detail-content]")!;
+  const stats = getCharacterStats(charIndex);
+  const skills = getCharacterSkills(charIndex);
+
+  const skillLines: string[] = [];
+  if (skills.passive) skillLines.push(`[P] ${skills.passive.name}: ${skills.passive.description}`);
+  skillLines.push(`[A] ${skills.active.name}: ${skills.active.description}`);
+  if (skills.unique) skillLines.push(`[U] ${skills.unique.name}: ${skills.unique.description}`);
+
+  contentEl.innerHTML = `
+    <div class="formation-card-detail-header">
+      <img src="${getCharacterIllustrationPath(charIndex)}" alt="${escapeHtml(getBodyDisplayName(charIndex))}" class="formation-card-detail-img" />
+      <div class="formation-card-detail-name">${escapeHtml(getBodyDisplayName(charIndex))}</div>
+    </div>
+    <div class="formation-card-detail-stats">
+      <div>エナジー: ${stats.energy}</div>
+      <div>SPEED: ${stats.speed}</div>
+      <div>攻撃: ${stats.attack} / 魔力: ${stats.magic}</div>
+      <div>防御: ${stats.defense} / 魔防: ${stats.magicDefense}</div>
+    </div>
+    <div class="formation-card-detail-skills">
+      <div class="formation-card-detail-skills-title">スキル</div>
+      ${skillLines.map((s) => `<div class="formation-card-detail-skill">${escapeHtml(s)}</div>`).join("")}
+    </div>
+  `;
+  cardDetailEl.classList.add("is-open");
+  cardDetailOpenedAt = Date.now();
+}
+
+function closeCardDetail(): void {
+  formationEl.querySelector(".formation-card-detail-overlay")?.classList.remove("is-open");
 }
 
 function renderCharacterPicker(): void {
@@ -170,6 +224,7 @@ function renderFormationContent(): void {
       slot.dataset.slotIndex = String(s);
       const idx = u.indices[s];
       if (idx >= 0) {
+        slot.dataset.charIndex = String(idx);
         const img = document.createElement("img");
         img.src = getCharacterIllustrationPath(idx);
         img.alt = getBodyDisplayName(idx);
@@ -212,9 +267,55 @@ function setupFormationScreen(): void {
   });
 
   const listEl = formationEl.querySelector("[data-formation-unit-list]")!;
+  let longPressTimer: number | null = null;
+  let didLongPress = false;
+  const LONG_PRESS_MS = 500;
+
+  listEl.addEventListener("pointerdown", (e) => {
+    const slotBtn = (e.target as HTMLElement).closest<HTMLButtonElement>("button.formation-slot");
+    if (!slotBtn || slotBtn.classList.contains("formation-slot-empty")) return;
+    const charIndex = slotBtn.dataset.charIndex;
+    if (!charIndex) return;
+    didLongPress = false;
+    slotBtn.setPointerCapture((e as PointerEvent).pointerId);
+    longPressTimer = window.setTimeout(() => {
+      longPressTimer = null;
+      didLongPress = true;
+      showCardDetail(parseInt(charIndex, 10));
+    }, LONG_PRESS_MS);
+  });
+
+  listEl.addEventListener("pointerup", (e) => {
+    if (longPressTimer !== null) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    if (didLongPress) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+  listEl.addEventListener("pointercancel", () => {
+    if (longPressTimer !== null) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  });
+  listEl.addEventListener("pointerleave", () => {
+    if (longPressTimer !== null) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  });
+
   listEl.addEventListener("click", (e) => {
     const slotBtn = (e.target as HTMLElement).closest<HTMLButtonElement>("button.formation-slot");
     if (slotBtn) {
+      if (longPressTimer !== null) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+      if (didLongPress) return;
       const unitId = slotBtn.dataset.unitId;
       const slotIndex = parseInt(slotBtn.dataset.slotIndex ?? "-1", 10);
       if (unitId && slotIndex >= 0 && slotIndex <= 2) {
@@ -224,13 +325,63 @@ function setupFormationScreen(): void {
     }
   });
 
+  const cardDetailOverlay = formationEl.querySelector(".formation-card-detail-overlay");
+  cardDetailOverlay?.querySelector("[data-card-detail-close]")?.addEventListener("click", closeCardDetail);
+  cardDetailOverlay?.addEventListener("click", (e) => {
+    if (e.target !== cardDetailOverlay) return;
+    if (Date.now() - cardDetailOpenedAt < CARD_DETAIL_CLOSE_DELAY_MS) return;
+    closeCardDetail();
+  });
+
+  const gridEl = characterPickerEl.querySelector("[data-char-picker-grid]")!;
+  let pickerLongPressTimer: number | null = null;
+  let pickerDidLongPress = false;
+
+  gridEl.addEventListener("pointerdown", (e) => {
+    const card = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-char-index]");
+    if (!card || card.disabled) return;
+    const charIndex = card.dataset.charIndex;
+    if (!charIndex) return;
+    pickerDidLongPress = false;
+    card.setPointerCapture((e as PointerEvent).pointerId);
+    pickerLongPressTimer = window.setTimeout(() => {
+      pickerLongPressTimer = null;
+      pickerDidLongPress = true;
+      showCardDetail(parseInt(charIndex, 10));
+    }, LONG_PRESS_MS);
+  });
+
+  gridEl.addEventListener("pointerup", (e) => {
+    if (pickerLongPressTimer !== null) {
+      clearTimeout(pickerLongPressTimer);
+      pickerLongPressTimer = null;
+    }
+    if (pickerDidLongPress) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+  gridEl.addEventListener("pointercancel", () => {
+    if (pickerLongPressTimer !== null) {
+      clearTimeout(pickerLongPressTimer);
+      pickerLongPressTimer = null;
+    }
+  });
+  gridEl.addEventListener("pointerleave", () => {
+    if (pickerLongPressTimer !== null) {
+      clearTimeout(pickerLongPressTimer);
+      pickerLongPressTimer = null;
+    }
+  });
+
   characterPickerEl.querySelector("[data-char-picker-close]")?.addEventListener("click", () => {
     closeCharacterPicker();
   });
 
-  characterPickerEl.querySelector("[data-char-picker-grid]")?.addEventListener("click", (e) => {
+  gridEl.addEventListener("click", (e) => {
     const card = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-char-index]");
     if (!card || card.disabled) return;
+    if (pickerDidLongPress) return;
     const charIndex = parseInt(card.dataset.charIndex ?? "-1", 10);
     if (charIndex < 0 || !editingUnitId || editingSlotIndex === null) return;
 
