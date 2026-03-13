@@ -803,9 +803,16 @@ export function applyEnergyBonus(baseEnergy: number, bonuses: FacilityBonuses): 
   return Math.floor(withPercent);
 }
 
-/** カテゴリ別に施設を取得 */
+/** カテゴリ別に施設を取得（本拠地拡張は城マス専用のため除外） */
 export function getFacilitiesByCategory(category: FacilityCategory): FacilityDef[] {
-  return Object.values(FACILITIES).filter(f => f.category === category);
+  return Object.values(FACILITIES).filter(
+    (f) => f.category === category && f.id !== "home_expansion"
+  );
+}
+
+/** 本拠地拡張施設を取得（城マス専用） */
+export function getHomeExpansionFacility(): FacilityDef | undefined {
+  return FACILITIES.home_expansion;
 }
 
 /** 全カテゴリを取得 */
