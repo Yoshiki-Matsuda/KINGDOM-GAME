@@ -72,9 +72,10 @@ export function showUnitSelect(pending: PendingUnitAction): void {
     titleEl.textContent = "援軍するユニットを選択";
   }
 
-  // 移動中（出撃中・帰還中）のユニットは選択不可
+  // 移動中（出撃中・帰還中）のユニットは選択不可。未完成ユニット（空きスロットあり）も除外
   const travelingUnitIds = new Set(travelingUnits.map((t) => t.unitId));
-  const availableUnits = formedUnitsList.filter((u) => !travelingUnitIds.has(u.id));
+  const completeUnits = formedUnitsList.filter((u) => u.indices.every((i) => i >= 0));
+  const availableUnits = completeUnits.filter((u) => !travelingUnitIds.has(u.id));
   const returningUnits = travelingUnits.filter((t) => t.actionType === "return" && (t.arrivalTime - Date.now()) / 1000 > 0);
 
   const renderReturningList = (container: Element) => {
@@ -95,7 +96,7 @@ export function showUnitSelect(pending: PendingUnitAction): void {
     panelEmpty.style.display = "block";
     const emptyMsg = unitSelectEl.querySelector(".unit-select-empty-msg")!;
     emptyMsg.textContent =
-      formedUnitsList.length > 0
+      completeUnits.length > 0
         ? "選択できるユニットがありません。出撃中・帰還中のユニットは到着までお待ちください。"
         : "編成されたユニットがありません。編成画面でキャラ3体を選んでユニットを編成してください。";
     const returningEmpty = unitSelectEl.querySelector("[data-unit-returning-empty]") as HTMLElement;
@@ -143,7 +144,8 @@ export function updateUnitSelectReturningList(): void {
   if (!unitSelectEl.classList.contains("is-open")) return;
   const now = Date.now();
   const travelingUnitIds = new Set(travelingUnits.map((t) => t.unitId));
-  const availableUnits = formedUnitsList.filter((u) => !travelingUnitIds.has(u.id));
+  const completeUnits = formedUnitsList.filter((u) => u.indices.every((i) => i >= 0));
+  const availableUnits = completeUnits.filter((u) => !travelingUnitIds.has(u.id));
   const returning = travelingUnits.filter((t) => t.actionType === "return" && (t.arrivalTime - now) / 1000 > 0);
 
   const fillReturningList = (container: Element) => {
@@ -172,7 +174,7 @@ export function updateUnitSelectReturningList(): void {
     panelEmpty.style.display = "block";
     const emptyMsg = unitSelectEl.querySelector(".unit-select-empty-msg")!;
     emptyMsg.textContent =
-      formedUnitsList.length > 0
+      completeUnits.length > 0
         ? "選択できるユニットがありません。出撃中・帰還中のユニットは到着までお待ちください。"
         : "編成されたユニットがありません。編成画面でキャラ3体を選んでユニットを編成してください。";
     if (returning.length > 0) {

@@ -151,7 +151,7 @@ function onMenuClick(e: MouseEvent): void {
 
   if (action === "deploy") {
     const tid = btn.dataset.territory ?? null;
-    const hasFormedUnit = formedUnitsList.length >= 1;
+    const hasFormedUnit = formedUnitsList.filter((u) => u.indices.every((i) => i >= 0)).length >= 1;
     if (tid && ws?.readyState === WebSocket.OPEN && hasFormedUnit) {
       closeMenu();
       showUnitSelect({ type: "deploy", territoryId: tid });
@@ -174,7 +174,7 @@ function onMenuClick(e: MouseEvent): void {
   if (action === "attack") {
     const toId = btn.dataset.to ?? null;
     const fromId = attackSourceId ?? (toId ? getAdjacentAttackSource(gameState, toId) : null);
-    const hasFormedUnit = formedUnitsList.length >= 1;
+    const hasFormedUnit = formedUnitsList.filter((u) => u.indices.every((i) => i >= 0)).length >= 1;
     if (ws?.readyState === WebSocket.OPEN && fromId && toId && hasFormedUnit) {
       closeMenu();
       showUnitSelect({ type: "attack", fromId, toId });

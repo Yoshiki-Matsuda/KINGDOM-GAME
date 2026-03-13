@@ -164,6 +164,11 @@ export function getBodyDisplayName(index: number): string {
   return CHARACTER_NAMES[index] ?? `キャラ${index + 1}`;
 }
 
+/** カードイラストのパス（キャラクターインデックス→画像URL） */
+export function getCharacterIllustrationPath(index: number): string {
+  return `/cards/character-${index}.png`;
+}
+
 /** カードのレアリティを取得 */
 export function getCardRarity(index: number): CardRarity {
   return CHARACTER_RARITY[index] ?? "common";

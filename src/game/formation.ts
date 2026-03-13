@@ -36,13 +36,32 @@ export function validateFormedUnits(): void {
   }
   setBodySpeeds(speeds.slice(0, homeTroops));
 
+  // 有効なユニット: 各indexが-1（空き）または 0..homeTroops-1
   let units = formedUnitsList.filter((u) =>
-    u.indices.every((i) => i >= 0 && i < homeTroops)
+    u.indices.every((i) => i === -1 || (i >= 0 && i < homeTroops))
   );
-  while (units.length * BODIES_PER_UNIT > homeTroops && units.length > 0) {
-    units.pop();
+  const completeUnits = units.filter((u) => u.indices.every((i) => i >= 0));
+  const incompleteUnits = units.filter((u) => u.indices.some((i) => i < 0));
+  // 完成ユニットが多すぎる場合のみ削除（未完成は編集用に残す）
+  let toKeep = completeUnits;
+  while (toKeep.length * BODIES_PER_UNIT > homeTroops && toKeep.length > 0) {
+    toKeep = toKeep.slice(0, -1);
   }
+  units = [...toKeep, ...incompleteUnits];
   setFormedUnitsList(units);
+}
+
+/** ユニットのenergy/avgSpeedをindicesから再計算（-1はスキップ） */
+export function recalcUnitStats(
+  indices: [number, number, number],
+  energies: number[],
+  speeds: number[]
+): { energy: number; avgSpeed: number } {
+  const valid = indices.filter((i) => i >= 0);
+  if (valid.length === 0) return { energy: 0, avgSpeed: 0 };
+  const energy = valid.reduce((s, i) => s + (energies[i] ?? DEFAULT_BODY_ENERGY), 0);
+  const avgSpeed = valid.reduce((s, i) => s + (speeds[i] ?? DEFAULT_BODY_SPEED), 0) / valid.length;
+  return { energy, avgSpeed };
 }
 
 /** 開発用: 編成が0のとき1ユニット（キャラ0,1,2）を自動追加 */
