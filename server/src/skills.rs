@@ -1327,11 +1327,15 @@ fn log_skill_trigger(
     character_name: &str,
     skill_name: &str,
     is_unique: bool,
+    description: &str,
 ) {
     if is_unique {
         log.push(format!("{} {}の固有スキル「{}」が発動！", prefix, character_name, skill_name));
     } else {
         log.push(format!("{} {}の「{}」が発動！", prefix, character_name, skill_name));
+    }
+    if !description.is_empty() {
+        log.push(format!("  → {}", description));
     }
 }
 
@@ -1349,7 +1353,7 @@ pub fn apply_battle_start_skills(
         if let Some(id) = passive_id {
             if let Some(skill) = get_triggered_skill(&id, SkillTiming::BattleStart) {
                 let char_name = characters.iter().find(|c| c.index == char_idx).map(|c| c.name.clone()).unwrap_or_default();
-                log_skill_trigger(log, "◆", &char_name, &skill.name, false);
+                log_skill_trigger(log, "◆", &char_name, &skill.name, false, &skill.description);
                 apply_skill_effects(&skill, char_idx, characters, log);
             }
         }
@@ -1357,7 +1361,7 @@ pub fn apply_battle_start_skills(
         if let Some(id) = unique_id {
             if let Some(skill) = get_triggered_skill(&id, SkillTiming::BattleStart) {
                 let char_name = characters.iter().find(|c| c.index == char_idx).map(|c| c.name.clone()).unwrap_or_default();
-                log_skill_trigger(log, "◆◆", &char_name, &skill.name, true);
+                log_skill_trigger(log, "◆◆", &char_name, &skill.name, true, &skill.description);
                 apply_skill_effects(&skill, char_idx, characters, log);
             }
         }
@@ -1372,7 +1376,7 @@ pub fn apply_attack_skills(
     let mut modifiers = AttackModifiers::default();
 
     if let Some(skill) = get_triggered_skill(&attacker.skills.active_id, SkillTiming::OnAttack) {
-        log_skill_trigger(log, "★", &attacker.name, &skill.name, false);
+        log_skill_trigger(log, "★", &attacker.name, &skill.name, false, &skill.description);
         for effect in &skill.effects {
             apply_attack_effect(effect, attacker, &mut modifiers, log);
         }
@@ -1380,7 +1384,7 @@ pub fn apply_attack_skills(
 
     if let Some(ref unique_id) = attacker.skills.unique_id {
         if let Some(skill) = get_triggered_skill(unique_id, SkillTiming::OnAttack) {
-            log_skill_trigger(log, "★★", &attacker.name, &skill.name, true);
+            log_skill_trigger(log, "★★", &attacker.name, &skill.name, true, &skill.description);
             for effect in &skill.effects {
                 apply_attack_effect(effect, attacker, &mut modifiers, log);
             }
@@ -1783,6 +1787,9 @@ pub fn check_death_skills(
                         skill.name,
                         character.effective_energy()
                     ));
+                    if !skill.description.is_empty() {
+                        log.push(format!("  → {}", skill.description));
+                    }
                     return true;
                 }
             }

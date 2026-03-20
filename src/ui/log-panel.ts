@@ -71,18 +71,81 @@ function getLogIcon(type: LogType): string {
   }
 }
 
+/** 占領/失敗の直後に続く戦利品・カード入手（同一攻撃の結果） */
+function isLootRelatedLine(line: string): boolean {
+  if (line.startsWith("--- 戦利品 ---")) return true;
+  if (line.startsWith("--- カード入手 ---")) return true;
+  if (line.includes("を入手！")) return true;
+  if (line === "遺跡を攻略しました！") return true;
+  return false;
+}
+
 /** ログを戦闘履歴にパース */
 function parseLogsToHistory(logs: string[]): BattleHistory[] {
   const histories: BattleHistory[] = [];
   let currentBattle: BattleHistory | null = null;
   let currentAction: ActionGroup | null = null;
   let battleId = 0;
+  let postBattleLootMode = false;
 
   for (const line of logs) {
     const type = classifyLog(line);
 
+    // 占領/失敗の直後に続く行は同一カードにまとめる。それ以外はここで戦闘を確定する
+    if (postBattleLootMode && currentBattle && !isLootRelatedLine(line) && type !== "battle_start") {
+      if (currentAction) currentBattle.actions.push(currentAction);
+      histories.push(currentBattle);
+      currentBattle = null;
+      currentAction = null;
+      postBattleLootMode = false;
+    }
+
+    if (postBattleLootMode && currentBattle && isLootRelatedLine(line)) {
+      if (line.startsWith("--- 戦利品 ---")) {
+        if (currentAction) currentBattle.actions.push(currentAction);
+        currentAction = {
+          type: "phase",
+          title: "戦利品",
+          icon: "🎁",
+          lines: [],
+        };
+      } else if (line.startsWith("--- カード入手 ---")) {
+        if (currentAction) currentBattle.actions.push(currentAction);
+        currentAction = {
+          type: "phase",
+          title: "カード入手",
+          icon: "🃏",
+          lines: [],
+        };
+      } else if (line === "遺跡を攻略しました！") {
+        if (!currentAction) {
+          currentAction = {
+            type: "phase",
+            title: "遺跡",
+            icon: "🏛️",
+            lines: [line],
+          };
+        } else {
+          currentAction.lines.push(line);
+        }
+      } else {
+        if (!currentAction) {
+          currentAction = {
+            type: "phase",
+            title: "戦利品",
+            icon: "🎁",
+            lines: [line],
+          };
+        } else {
+          currentAction.lines.push(line);
+        }
+      }
+      continue;
+    }
+
     // 新しい戦闘の開始
     if (type === "battle_start") {
+      postBattleLootMode = false;
       if (currentBattle) {
         if (currentAction) currentBattle.actions.push(currentAction);
         histories.push(currentBattle);
@@ -146,7 +209,7 @@ function parseLogsToHistory(logs: string[]): BattleHistory[] {
       };
     }
 
-    // 戦闘終了
+    // 戦闘終了（戦利品はこの直後に続く同一侵攻のログとして扱う）
     if (type === "battle_end") {
       if (currentAction) {
         currentBattle.actions.push(currentAction);
@@ -160,9 +223,8 @@ function parseLogsToHistory(logs: string[]): BattleHistory[] {
         lines: [line],
       };
       currentBattle.actions.push(currentAction);
-      histories.push(currentBattle);
-      currentBattle = null;
       currentAction = null;
+      postBattleLootMode = true;
       continue;
     }
 

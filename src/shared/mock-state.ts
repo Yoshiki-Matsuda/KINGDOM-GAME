@@ -76,6 +76,6 @@ export function getMockGameState(): GameState {
     turn: 1,
     phase: "idle",
     territories: buildMockTerritories(),
-    log: ["ゲームを開始しました。（開発用マスデータ）"],
+    log: [],
   };
 }

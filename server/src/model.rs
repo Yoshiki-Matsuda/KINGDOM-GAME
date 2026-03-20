@@ -175,7 +175,7 @@ impl Default for GameState {
             turn: 1,
             phase: "idle".to_string(),
             territories: default_territories(),
-            log: vec!["ゲームを開始しました。".to_string()],
+            log: vec![],
             players,
             // 後方互換性のため直接フィールドにもコピー
             deployable_owner_ids: vec![],

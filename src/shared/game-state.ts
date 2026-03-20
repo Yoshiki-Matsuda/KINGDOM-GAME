@@ -120,7 +120,7 @@ export function getDeployableOwnerIds(state: GameState, playerId: string = DEFAU
 export const DEFAULT_GAME_STATE: GameState = {
   turn: 1,
   phase: "idle",
-  log: ["ゲームを開始しました。"],
+  log: [],
   territories: [],
   players: {},
   deployable_owner_ids: [],
