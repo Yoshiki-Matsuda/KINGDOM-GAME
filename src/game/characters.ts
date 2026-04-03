@@ -3,8 +3,8 @@ import { getCharacterSkills, type CharacterSkills, type SkillData, getCharacterS
 /** 3体で1ユニットが編成される */
 export const BODIES_PER_UNIT = 3;
 
-/** キャラ1体あたりの仮のエナジー（必ず勝てる数値） */
-export const DEFAULT_BODY_ENERGY = 10;
+/** キャラ1体あたりの仮の魔獣数（必ず勝てる数値） */
+export const DEFAULT_BODY_MONSTER_COUNT = 10;
 
 /** キャラ1体あたりのデフォルトSPEED（1〜10、高いほど速い） */
 export const DEFAULT_BODY_SPEED = 5;
@@ -14,86 +14,144 @@ export const BASE_TRAVEL_TIME_PER_TILE = 2.0;
 
 /** カードの基本ステータス定義 */
 export interface CardStats {
-  /** エナジー（HP/ベース係数） */
-  energy: number;
+  /** 魔獣数（HP/ベース係数） */
+  monster_count: number;
   /** スピード（行動順序） */
   speed: number;
   /** 攻撃力（物理ダメージ） */
   attack: number;
-  /** 魔力（魔法ダメージ） */
-  magic: number;
+  /** 知力（スキル効果に影響） */
+  intelligence: number;
   /** 防御力（物理防御） */
   defense: number;
   /** 魔法防御力 */
   magicDefense: number;
+  /** 射程 (1=近接, 2=中距離, 3=遠距離) */
+  range: number;
+  /** ユニット編成コスト (KC) */
+  cost: number;
+  /** 占拠力 */
+  occupationPower: number;
 }
 
-/** デフォルトのカードステータス */
 export const DEFAULT_CARD_STATS: CardStats = {
-  energy: 10,
+  monster_count: 10,
   speed: 5,
   attack: 5,
-  magic: 5,
+  intelligence: 5,
   defense: 3,
   magicDefense: 3,
+  range: 1,
+  cost: 1.5,
+  occupationPower: 100,
 };
+
+/** カードのレアリティ */
+export type CardRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
+
+/** KC準拠の7種族 */
+export type Race = "beast" | "demihuman" | "demon" | "dragon" | "giant" | "spirit" | "undead";
 
 /** キャラクターデータ */
 export interface CharacterData {
   index: number;
   name: string;
+  race: Race;
   stats: CardStats;
   skills: CharacterSkills;
 }
 
-/** カードのレアリティ */
-export type CardRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
-
 /** 各キャラクターの固有ステータス */
 const CHARACTER_STATS: Record<number, Partial<CardStats>> = {
-  // === プレイヤー初期カード（北欧神話） ===
-  0: { energy: 15, attack: 8, magic: 3, defense: 5, magicDefense: 3, speed: 4 }, // オーディン: バランス型
-  1: { energy: 18, attack: 12, magic: 2, defense: 6, magicDefense: 2, speed: 3 }, // トール: 物理アタッカー
-  2: { energy: 10, attack: 4, magic: 10, defense: 2, magicDefense: 5, speed: 7 }, // ロキ: 魔法アタッカー
-  3: { energy: 12, attack: 3, magic: 9, defense: 3, magicDefense: 7, speed: 5 },  // フレイヤ: 魔法サポート
-  4: { energy: 14, attack: 7, magic: 6, defense: 4, magicDefense: 4, speed: 5 },  // フレイ: ハイブリッド
-  5: { energy: 16, attack: 5, magic: 3, defense: 8, magicDefense: 6, speed: 4 },  // ヘイムダル: タンク
-  6: { energy: 13, attack: 6, magic: 7, defense: 4, magicDefense: 5, speed: 5 },  // バルドル: バランス型
-  7: { energy: 14, attack: 9, magic: 2, defense: 5, magicDefense: 2, speed: 6 },  // ティール: 物理アタッカー
-  8: { energy: 12, attack: 4, magic: 8, defense: 3, magicDefense: 6, speed: 5 },  // ニョルド: 魔法型
-  9: { energy: 11, attack: 7, magic: 4, defense: 3, magicDefense: 3, speed: 8 },  // ウール: スピード型
-  
+  // === プレイヤー初期カード（KC 7種族） ===
+  0: { monster_count: 15, attack: 9, intelligence: 3, defense: 4, magicDefense: 3, speed: 6 },  // ダイアウルフ
+  1: { monster_count: 18, attack: 7, intelligence: 4, defense: 6, magicDefense: 3, speed: 5 },  // ゴブリンウォリアー
+  2: { monster_count: 10, attack: 4, intelligence: 10, defense: 2, magicDefense: 6, speed: 7, range: 2 }, // インプ
+  3: { monster_count: 12, attack: 8, intelligence: 6, defense: 5, magicDefense: 5, speed: 5, range: 2 },  // ワイバーン
+  4: { monster_count: 16, attack: 6, intelligence: 2, defense: 10, magicDefense: 4, speed: 3 }, // ゴーレム
+  5: { monster_count: 11, attack: 5, intelligence: 9, defense: 3, magicDefense: 7, speed: 5, range: 2 },  // サラマンダー
+  6: { monster_count: 14, attack: 7, intelligence: 3, defense: 7, magicDefense: 4, speed: 4 },  // スケルトンソルジャー
+  7: { monster_count: 13, attack: 8, intelligence: 4, defense: 3, magicDefense: 3, speed: 7 },  // ヘルハウンド
+  8: { monster_count: 14, attack: 8, intelligence: 5, defense: 5, magicDefense: 4, speed: 5 },  // リザードマン
+  9: { monster_count: 16, attack: 5, intelligence: 7, defense: 8, magicDefense: 6, speed: 3 },  // トレント
+
   // === フィールド敵（Lv1〜6） ===
-  10: { energy: 2, attack: 3, magic: 2, defense: 2, magicDefense: 1, speed: 3 },  // スライム: 最弱
-  11: { energy: 4, attack: 5, magic: 3, defense: 3, magicDefense: 2, speed: 4 },  // ゴブリン: 雑魚
-  12: { energy: 6, attack: 8, magic: 4, defense: 6, magicDefense: 3, speed: 3 },  // オーク: 物理型
-  13: { energy: 8, attack: 10, magic: 6, defense: 8, magicDefense: 5, speed: 4 }, // 骸骨戦士: バランス
-  14: { energy: 12, attack: 15, magic: 8, defense: 12, magicDefense: 6, speed: 3 }, // オーガ: 重量級
-  15: { energy: 15, attack: 20, magic: 15, defense: 15, magicDefense: 10, speed: 6 }, // ワイバーン: 強敵
+  10: { monster_count: 2, attack: 3, intelligence: 2, defense: 2, magicDefense: 1, speed: 3 },  // ゴブリン
+  11: { monster_count: 4, attack: 5, intelligence: 3, defense: 3, magicDefense: 2, speed: 4 },  // コボルド
+  12: { monster_count: 6, attack: 8, intelligence: 4, defense: 6, magicDefense: 3, speed: 3 },  // オーク
+  13: { monster_count: 8, attack: 10, intelligence: 6, defense: 8, magicDefense: 5, speed: 4 }, // スケルトン
+  14: { monster_count: 12, attack: 15, intelligence: 3, defense: 12, magicDefense: 4, speed: 3 }, // トロール
+  15: { monster_count: 15, attack: 20, intelligence: 15, defense: 15, magicDefense: 10, speed: 6, range: 2 }, // ドレイク
 
   // === 遺跡敵（ノーマル） ===
-  20: { energy: 8, attack: 6, magic: 2, defense: 10, magicDefense: 4, speed: 2 },  // ゴーレム: 防御型
-  21: { energy: 6, attack: 4, magic: 8, defense: 3, magicDefense: 8, speed: 5 },   // ファントム: 魔法型
-  22: { energy: 10, attack: 10, magic: 3, defense: 8, magicDefense: 4, speed: 4 }, // スケルトンナイト: 物理
-  23: { energy: 12, attack: 5, magic: 12, defense: 4, magicDefense: 6, speed: 4 }, // スライムキング: 魔法
-  24: { energy: 7, attack: 8, magic: 5, defense: 5, magicDefense: 5, speed: 7 },   // トレジャーミミック: バランス
-  25: { energy: 5, attack: 6, magic: 4, defense: 3, magicDefense: 3, speed: 6 },   // 毒蜘蛛: 速攻
+  20: { monster_count: 8, attack: 6, intelligence: 2, defense: 10, magicDefense: 4, speed: 2 },  // ストーンゴーレム
+  21: { monster_count: 6, attack: 4, intelligence: 8, defense: 3, magicDefense: 8, speed: 5, range: 2 },   // ゴースト
+  22: { monster_count: 10, attack: 10, intelligence: 3, defense: 8, magicDefense: 4, speed: 4 }, // スケルトンナイト
+  23: { monster_count: 12, attack: 7, intelligence: 8, defense: 4, magicDefense: 6, speed: 5 }, // コカトリス
+  24: { monster_count: 7, attack: 8, intelligence: 5, defense: 5, magicDefense: 5, speed: 7 },   // ミミック
+  25: { monster_count: 5, attack: 6, intelligence: 4, defense: 3, magicDefense: 3, speed: 6 },   // ポイズンスパイダー
 
   // === 遺跡敵（レア） ===
-  30: { energy: 12, attack: 12, magic: 10, defense: 6, magicDefense: 8, speed: 5 }, // ダークウィザード: 魔法
-  31: { energy: 14, attack: 14, magic: 4, defense: 12, magicDefense: 6, speed: 3 }, // 呪われた鎧: 物理防御
-  32: { energy: 10, attack: 16, magic: 2, defense: 6, magicDefense: 4, speed: 8 },  // シャドウアサシン: 速攻
-  33: { energy: 9, attack: 6, magic: 14, defense: 4, magicDefense: 10, speed: 5 },  // 炎の精霊: 魔法
-  34: { energy: 9, attack: 6, magic: 14, defense: 4, magicDefense: 10, speed: 5 },  // 氷の精霊: 魔法
-  35: { energy: 16, attack: 12, magic: 6, defense: 14, magicDefense: 8, speed: 4 }, // デスナイト: タンク
-  36: { energy: 11, attack: 8, magic: 16, defense: 5, magicDefense: 12, speed: 5 }, // ネクロマンサー: 魔法
-  37: { energy: 14, attack: 10, magic: 12, defense: 12, magicDefense: 12, speed: 4 }, // クリスタルゴーレム: バランス
+  30: { monster_count: 12, attack: 12, intelligence: 10, defense: 6, magicDefense: 8, speed: 5, range: 2 }, // ダークウィザード
+  31: { monster_count: 14, attack: 14, intelligence: 4, defense: 12, magicDefense: 6, speed: 4 }, // ガーゴイル
+  32: { monster_count: 10, attack: 16, intelligence: 2, defense: 6, magicDefense: 4, speed: 8 },  // シャドウアサシン
+  33: { monster_count: 9, attack: 6, intelligence: 14, defense: 4, magicDefense: 10, speed: 5, range: 2 },  // フレイムスピリット
+  34: { monster_count: 9, attack: 6, intelligence: 14, defense: 4, magicDefense: 10, speed: 5, range: 2 },  // アイスエレメンタル
+  35: { monster_count: 16, attack: 12, intelligence: 6, defense: 14, magicDefense: 8, speed: 4 }, // デスナイト
+  36: { monster_count: 14, attack: 14, intelligence: 12, defense: 10, magicDefense: 10, speed: 4 }, // ヒュドラ
+  37: { monster_count: 14, attack: 16, intelligence: 4, defense: 12, magicDefense: 6, speed: 5 }, // ミノタウロス
 
   // === 遺跡敵（レジェンダリー） ===
-  40: { energy: 25, attack: 18, magic: 10, defense: 20, magicDefense: 15, speed: 3 }, // 遺跡の守護者: 超タンク
-  41: { energy: 30, attack: 25, magic: 15, defense: 18, magicDefense: 12, speed: 4 }, // ドラゴンゾンビ: 物理
-  42: { energy: 22, attack: 15, magic: 25, defense: 12, magicDefense: 20, speed: 5 }, // リッチロード: 魔法
-  43: { energy: 35, attack: 22, magic: 12, defense: 25, magicDefense: 18, speed: 2 }, // タイタンコロッサス: 超重量
+  40: { monster_count: 30, attack: 25, intelligence: 18, defense: 20, magicDefense: 15, speed: 4 }, // ニーズヘッグ
+  41: { monster_count: 22, attack: 18, intelligence: 20, defense: 14, magicDefense: 18, speed: 6 }, // ヴァンパイアロード
+  42: { monster_count: 22, attack: 15, intelligence: 25, defense: 12, magicDefense: 20, speed: 5, range: 2 }, // リッチ
+  43: { monster_count: 35, attack: 22, intelligence: 12, defense: 25, magicDefense: 18, speed: 2 }, // タイタン
+
+  // === 収集可能カード ===
+  // --- 獣族 ---
+  50: { monster_count: 8, attack: 4, intelligence: 2, defense: 3, magicDefense: 2, speed: 8 },   // バット
+  51: { monster_count: 10, attack: 6, intelligence: 3, defense: 5, magicDefense: 3, speed: 7 },  // ジャイアントバット
+  52: { monster_count: 12, attack: 7, intelligence: 4, defense: 5, magicDefense: 4, speed: 7 },  // ヴァンパイアバット
+  53: { monster_count: 14, attack: 9, intelligence: 5, defense: 6, magicDefense: 5, speed: 8, range: 2 },  // カマソッツ
+  54: { monster_count: 11, attack: 7, intelligence: 4, defense: 6, magicDefense: 3, speed: 5 },  // ボーゲスト
+  55: { monster_count: 14, attack: 10, intelligence: 5, defense: 7, magicDefense: 4, speed: 6 }, // ガイトラッシュ
+  56: { monster_count: 18, attack: 14, intelligence: 6, defense: 8, magicDefense: 5, speed: 9 }, // レウクロコタ
+  // --- 亜人族 ---
+  60: { monster_count: 6, attack: 5, intelligence: 2, defense: 2, magicDefense: 1, speed: 4, range: 3, cost: 1.0 },   // ゴブリンアーチャー
+  61: { monster_count: 10, attack: 5, intelligence: 5, defense: 5, magicDefense: 4, speed: 4, range: 2 },  // ゴブリンコック
+  62: { monster_count: 12, attack: 7, intelligence: 5, defense: 8, magicDefense: 5, speed: 5, range: 2 },  // ホブゴブリン
+  63: { monster_count: 14, attack: 8, intelligence: 4, defense: 10, magicDefense: 5, speed: 3 }, // オークアーマーナイト
+  64: { monster_count: 12, attack: 9, intelligence: 5, defense: 6, magicDefense: 4, speed: 6 },  // ゴブリンソードマン
+  65: { monster_count: 16, attack: 12, intelligence: 4, defense: 11, magicDefense: 6, speed: 5, range: 2 },// ホブゴブリンダークナイト
+  66: { monster_count: 15, attack: 12, intelligence: 10, defense: 10, magicDefense: 8, speed: 5 },// ゴブリンプリンセス
+  // --- 魔族 ---
+  70: { monster_count: 8, attack: 6, intelligence: 5, defense: 4, magicDefense: 5, speed: 5 },   // レッサーデーモン
+  71: { monster_count: 10, attack: 5, intelligence: 10, defense: 4, magicDefense: 8, speed: 6, range: 2 }, // サキュバス
+  72: { monster_count: 12, attack: 8, intelligence: 6, defense: 6, magicDefense: 5, speed: 7 },  // ナイトメア
+  73: { monster_count: 16, attack: 13, intelligence: 8, defense: 10, magicDefense: 8, speed: 5 },// アークデーモン
+  74: { monster_count: 14, attack: 10, intelligence: 16, defense: 8, magicDefense: 14, speed: 7, range: 2 },// リリス
+  // --- 竜族 ---
+  80: { monster_count: 8, attack: 7, intelligence: 4, defense: 5, magicDefense: 4, speed: 4 },   // リンドヴルム
+  81: { monster_count: 12, attack: 8, intelligence: 6, defense: 7, magicDefense: 6, speed: 5 },  // シーサーペント
+  82: { monster_count: 14, attack: 11, intelligence: 9, defense: 8, magicDefense: 7, speed: 5, range: 2 }, // ファイアドレイク
+  83: { monster_count: 20, attack: 18, intelligence: 14, defense: 16, magicDefense: 12, speed: 4, range: 2 },// バハムート
+  // --- 巨人族 ---
+  90: { monster_count: 10, attack: 7, intelligence: 2, defense: 6, magicDefense: 2, speed: 3 },  // オーガ
+  91: { monster_count: 14, attack: 9, intelligence: 3, defense: 9, magicDefense: 4, speed: 3 },  // サイクロプス
+  92: { monster_count: 18, attack: 10, intelligence: 3, defense: 14, magicDefense: 6, speed: 2 },// アイアンゴーレム
+  93: { monster_count: 22, attack: 16, intelligence: 5, defense: 18, magicDefense: 10, speed: 3 },// ギガース
+  // --- 精霊族 ---
+  100: { monster_count: 6, attack: 3, intelligence: 7, defense: 2, magicDefense: 6, speed: 6, range: 2 },  // ウィスプ
+  101: { monster_count: 8, attack: 4, intelligence: 9, defense: 3, magicDefense: 7, speed: 7, range: 2 },  // シルフ
+  102: { monster_count: 10, attack: 5, intelligence: 10, defense: 5, magicDefense: 9, speed: 5, range: 2 },// ウンディーネ
+  103: { monster_count: 14, attack: 12, intelligence: 11, defense: 7, magicDefense: 8, speed: 5, range: 2 },// イフリート
+  104: { monster_count: 16, attack: 10, intelligence: 15, defense: 8, magicDefense: 14, speed: 6, range: 2 },// フェニックス
+  // --- 不死族 ---
+  110: { monster_count: 10, attack: 5, intelligence: 1, defense: 6, magicDefense: 2, speed: 2 }, // ゾンビ
+  111: { monster_count: 8, attack: 4, intelligence: 8, defense: 3, magicDefense: 9, speed: 5, range: 2 },  // レイス
+  112: { monster_count: 12, attack: 8, intelligence: 5, defense: 7, magicDefense: 5, speed: 4 }, // ワイト
+  113: { monster_count: 14, attack: 11, intelligence: 4, defense: 10, magicDefense: 6, speed: 5 },// ドゥラハン
+  114: { monster_count: 16, attack: 8, intelligence: 18, defense: 8, magicDefense: 16, speed: 4, range: 2, cost: 1.0 },// エルダーリッチ
 };
 
 /** キャラクターの完全ステータスを取得 */
@@ -104,45 +162,61 @@ export function getCharacterStats(index: number): CardStats {
 
 /** 全キャラクター名 */
 const CHARACTER_NAMES: Record<number, string> = {
-  // プレイヤー初期カード（北欧神話）
-  0: "オーディン",
-  1: "トール",
-  2: "ロキ",
-  3: "フレイヤ",
-  4: "フレイ",
-  5: "ヘイムダル",
-  6: "バルドル",
-  7: "ティール",
-  8: "ニョルド",
-  9: "ウール",
+  // プレイヤー初期カード（KC 7種族）
+  0: "ダイアウルフ",
+  1: "ゴブリンウォリアー",
+  2: "インプ",
+  3: "ワイバーン",
+  4: "ゴーレム",
+  5: "サラマンダー",
+  6: "スケルトンソルジャー",
+  7: "ヘルハウンド",
+  8: "リザードマン",
+  9: "トレント",
   // フィールド敵
-  10: "スライム",
-  11: "ゴブリン",
+  10: "ゴブリン",
+  11: "コボルド",
   12: "オーク",
-  13: "骸骨戦士",
-  14: "オーガ",
-  15: "ワイバーン",
+  13: "スケルトン",
+  14: "トロール",
+  15: "ドレイク",
   // 遺跡敵（ノーマル）
-  20: "ゴーレム",
-  21: "ファントム",
+  20: "ストーンゴーレム",
+  21: "ゴースト",
   22: "スケルトンナイト",
-  23: "スライムキング",
-  24: "トレジャーミミック",
-  25: "毒蜘蛛",
+  23: "コカトリス",
+  24: "ミミック",
+  25: "ポイズンスパイダー",
   // 遺跡敵（レア）
   30: "ダークウィザード",
-  31: "呪われた鎧",
+  31: "ガーゴイル",
   32: "シャドウアサシン",
-  33: "炎の精霊",
-  34: "氷の精霊",
+  33: "フレイムスピリット",
+  34: "アイスエレメンタル",
   35: "デスナイト",
-  36: "ネクロマンサー",
-  37: "クリスタルゴーレム",
+  36: "ヒュドラ",
+  37: "ミノタウロス",
   // 遺跡敵（レジェンダリー）
-  40: "遺跡の守護者",
-  41: "ドラゴンゾンビ",
-  42: "リッチロード",
-  43: "タイタンコロッサス",
+  40: "ニーズヘッグ",
+  41: "ヴァンパイアロード",
+  42: "リッチ",
+  43: "タイタン",
+  // 獣族
+  50: "バット", 51: "ジャイアントバット", 52: "ヴァンパイアバット",
+  53: "カマソッツ", 54: "ボーゲスト", 55: "ガイトラッシュ", 56: "レウクロコタ",
+  // 亜人族
+  60: "ゴブリンアーチャー", 61: "ゴブリンコック", 62: "ホブゴブリン",
+  63: "オークアーマーナイト", 64: "ゴブリンソードマン", 65: "ホブゴブリンダークナイト", 66: "ゴブリンプリンセス",
+  // 魔族
+  70: "レッサーデーモン", 71: "サキュバス", 72: "ナイトメア", 73: "アークデーモン", 74: "リリス",
+  // 竜族
+  80: "リンドヴルム", 81: "シーサーペント", 82: "ファイアドレイク", 83: "バハムート",
+  // 巨人族
+  90: "オーガ", 91: "サイクロプス", 92: "アイアンゴーレム", 93: "ギガース",
+  // 精霊族
+  100: "ウィスプ", 101: "シルフ", 102: "ウンディーネ", 103: "イフリート", 104: "フェニックス",
+  // 不死族
+  110: "ゾンビ", 111: "レイス", 112: "ワイト", 113: "ドゥラハン", 114: "エルダーリッチ",
 };
 
 /** カードのレアリティ */
@@ -158,6 +232,44 @@ const CHARACTER_RARITY: Record<number, CardRarity> = {
   30: "rare", 31: "rare", 32: "rare", 33: "rare", 34: "rare", 35: "epic", 36: "epic", 37: "epic",
   // 遺跡敵（レジェンダリー）
   40: "legendary", 41: "legendary", 42: "legendary", 43: "legendary",
+  // 獣族
+  50: "common", 51: "uncommon", 52: "uncommon", 53: "rare", 54: "uncommon", 55: "rare", 56: "epic",
+  // 亜人族
+  60: "common", 61: "common", 62: "uncommon", 63: "uncommon", 64: "uncommon", 65: "rare", 66: "epic",
+  // 魔族
+  70: "common", 71: "uncommon", 72: "uncommon", 73: "rare", 74: "epic",
+  // 竜族
+  80: "common", 81: "uncommon", 82: "rare", 83: "epic",
+  // 巨人族
+  90: "common", 91: "uncommon", 92: "rare", 93: "epic",
+  // 精霊族
+  100: "common", 101: "uncommon", 102: "uncommon", 103: "rare", 104: "epic",
+  // 不死族
+  110: "common", 111: "uncommon", 112: "uncommon", 113: "rare", 114: "epic",
+};
+
+/** キャラクターの種族 */
+const CHARACTER_RACES: Record<number, Race> = {
+  0: "beast", 1: "demihuman", 2: "demon", 3: "dragon", 4: "giant",
+  5: "spirit", 6: "undead", 7: "beast", 8: "demihuman", 9: "spirit",
+  10: "demihuman", 11: "demihuman", 12: "demihuman", 13: "undead", 14: "giant", 15: "dragon",
+  20: "giant", 21: "undead", 22: "undead", 23: "beast", 24: "demon", 25: "beast",
+  30: "demon", 31: "demon", 32: "demon", 33: "spirit", 34: "spirit", 35: "undead", 36: "dragon", 37: "giant",
+  40: "dragon", 41: "undead", 42: "undead", 43: "giant",
+  // 獣族
+  50: "beast", 51: "beast", 52: "beast", 53: "beast", 54: "beast", 55: "beast", 56: "beast",
+  // 亜人族
+  60: "demihuman", 61: "demihuman", 62: "demihuman", 63: "demihuman", 64: "demihuman", 65: "demihuman", 66: "demihuman",
+  // 魔族
+  70: "demon", 71: "demon", 72: "demon", 73: "demon", 74: "demon",
+  // 竜族
+  80: "dragon", 81: "dragon", 82: "dragon", 83: "dragon",
+  // 巨人族
+  90: "giant", 91: "giant", 92: "giant", 93: "giant",
+  // 精霊族
+  100: "spirit", 101: "spirit", 102: "spirit", 103: "spirit", 104: "spirit",
+  // 不死族
+  110: "undead", 111: "undead", 112: "undead", 113: "undead", 114: "undead",
 };
 
 export function getBodyDisplayName(index: number): string {
@@ -174,6 +286,11 @@ export function getCardRarity(index: number): CardRarity {
   return CHARACTER_RARITY[index] ?? "common";
 }
 
+/** カードの種族を取得 */
+export function getCardRace(index: number): Race {
+  return CHARACTER_RACES[index] ?? "demihuman";
+}
+
 /** カード名からインデックスを取得 */
 export function getCardIndexByName(name: string): number | undefined {
   for (const [idx, n] of Object.entries(CHARACTER_NAMES)) {
@@ -187,18 +304,20 @@ export function getCharacterData(index: number): CharacterData {
   return {
     index,
     name: getBodyDisplayName(index),
+    race: getCardRace(index),
     stats: getCharacterStats(index),
     skills: getCharacterSkills(index),
   };
 }
 
-/** 後方互換: energy, speedを指定してデータ取得（既存コードとの互換用） */
-export function getCharacterDataLegacy(index: number, energy: number, speed: number): CharacterData {
+/** 後方互換: monster_count, speedを指定してデータ取得（既存コードとの互換用） */
+export function getCharacterDataLegacy(index: number, monsterCount: number, speed: number): CharacterData {
   const stats = getCharacterStats(index);
   return {
     index,
     name: getBodyDisplayName(index),
-    stats: { ...stats, energy, speed },
+    race: getCardRace(index),
+    stats: { ...stats, monster_count: monsterCount, speed },
     skills: getCharacterSkills(index),
   };
 }

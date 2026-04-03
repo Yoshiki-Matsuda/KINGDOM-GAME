@@ -35,9 +35,9 @@ export type SkillTarget =
 /** スキルの効果タイプ */
 export type SkillEffectType =
   // === ステータス変更系 ===
-  | "energy_multiply"   // エナジー倍率
-  | "energy_add"        // エナジー加算
-  | "energy_set"        // エナジー固定値設定
+  | "monster_multiply"   // 魔獣数倍率
+  | "monster_add"        // 魔獣数加算
+  | "monster_set"        // 魔獣数固定値設定
   | "speed_multiply"    // SPEED倍率
   | "speed_add"         // SPEED加算
   | "damage_multiply"   // ダメージ倍率
@@ -84,7 +84,7 @@ export type SkillEffectType =
   | "copy_buff"         // バフコピー
   | "transfer_debuff"   // デバフ転送
   | "cooldown_reduce"   // クールダウン短縮
-  | "energy_steal"      // エナジー奪取
+  | "monster_steal"      // 魔獣数奪取
   | "summon";           // 召喚
 
 /** スキル効果の条件 */
@@ -141,14 +141,14 @@ export interface CharacterSkills {
 
 /** パッシブスキル一覧 */
 export const PASSIVE_SKILLS: Record<string, Skill> = {
-  // === エナジー・ステータス系 ===
+  // === 魔獣数・ステータス系 ===
   power_aura: {
     id: "power_aura",
     name: "闘気の波動",
-    description: "戦闘開始時、味方全員のエナジー1.2倍",
+    description: "戦闘開始時、味方全員の魔獣数1.2倍",
     category: "passive",
     timing: "battle_start",
-    effects: [{ type: "energy_multiply", target: "ally_unit", value: 1.2 }],
+    effects: [{ type: "monster_multiply", target: "ally_unit", value: 1.2 }],
   },
   wind_blessing: {
     id: "wind_blessing",
@@ -161,10 +161,10 @@ export const PASSIVE_SKILLS: Record<string, Skill> = {
   life_blessing: {
     id: "life_blessing",
     name: "生命の恵み",
-    description: "戦闘開始時、味方全員のエナジー+3",
+    description: "戦闘開始時、味方全員の魔獣数+3",
     category: "passive",
     timing: "battle_start",
-    effects: [{ type: "energy_add", target: "ally_unit", value: 3 }],
+    effects: [{ type: "monster_add", target: "ally_unit", value: 3 }],
   },
   rage_aura: {
     id: "rage_aura",
@@ -290,7 +290,7 @@ export const PASSIVE_SKILLS: Record<string, Skill> = {
     description: "致死ダメージを1回だけHP1で耐える",
     category: "passive",
     timing: "on_death",
-    effects: [{ type: "energy_set", target: "self", value: 1 }],
+    effects: [{ type: "monster_set", target: "self", value: 1 }],
     probability: 100,
   },
 };
@@ -386,13 +386,13 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
     timing: "on_attack",
     effects: [{ type: "absorb", target: "self", value: 0.3 }],
   },
-  energy_steal: {
-    id: "energy_steal",
+  monster_steal: {
+    id: "monster_steal",
     name: "奪命の一撃",
-    description: "攻撃時、敵から3エナジーを奪う",
+    description: "攻撃時、敵から3魔獣数を奪う",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "energy_steal", target: "enemy_single", value: 3 }],
+    effects: [{ type: "monster_steal", target: "enemy_single", value: 3 }],
   },
   heal_strike: {
     id: "heal_strike",
@@ -562,7 +562,7 @@ export const UNIQUE_SKILLS: Record<string, Skill> = {
   fake_death: {
     id: "fake_death",
     name: "偽りの死",
-    description: "死亡時、50%でエナジー半分で復活",
+    description: "死亡時、50%で魔獣数半分で復活",
     category: "unique",
     timing: "on_death",
     effects: [{ type: "revive", target: "self", value: 0.5 }],
@@ -571,7 +571,7 @@ export const UNIQUE_SKILLS: Record<string, Skill> = {
   phoenix_rebirth: {
     id: "phoenix_rebirth",
     name: "不死鳥の転生",
-    description: "死亡時、100%でエナジー全快で復活（1回のみ）",
+    description: "死亡時、100%で魔獣数全快で復活（1回のみ）",
     category: "unique",
     timing: "on_death",
     effects: [{ type: "revive", target: "self", value: 1.0 }],
@@ -581,10 +581,10 @@ export const UNIQUE_SKILLS: Record<string, Skill> = {
   beauty_charm: {
     id: "beauty_charm",
     name: "美神の輝き",
-    description: "戦闘開始時、味方全員のエナジー1.5倍",
+    description: "戦闘開始時、味方全員の魔獣数1.5倍",
     category: "unique",
     timing: "battle_start",
-    effects: [{ type: "energy_multiply", target: "ally_unit", value: 1.5 }],
+    effects: [{ type: "monster_multiply", target: "ally_unit", value: 1.5 }],
   },
   war_god_blessing: {
     id: "war_god_blessing",
@@ -607,10 +607,10 @@ export const UNIQUE_SKILLS: Record<string, Skill> = {
   soul_reap: {
     id: "soul_reap",
     name: "魂狩り",
-    description: "敵を倒した時、その敵のエナジーの50%を獲得",
+    description: "敵を倒した時、その敵の魔獣数の50%を獲得",
     category: "unique",
     timing: "on_kill",
-    effects: [{ type: "energy_steal", target: "enemy_single", value: 0.5 }],
+    effects: [{ type: "monster_steal", target: "enemy_single", value: 0.5 }],
   },
 
   // === 状態異常系 ===
@@ -662,12 +662,12 @@ export const UNIQUE_SKILLS: Record<string, Skill> = {
   sacrifice: {
     id: "sacrifice",
     name: "生贄の儀",
-    description: "自分のHP半分を消費し、味方全員のエナジー2倍",
+    description: "自分のHP半分を消費し、味方全員の魔獣数2倍",
     category: "unique",
     timing: "battle_start",
     effects: [
       { type: "percent_damage", target: "self", value: 0.5 },
-      { type: "energy_multiply", target: "ally_unit", value: 2.0 },
+      { type: "monster_multiply", target: "ally_unit", value: 2.0 },
     ],
   },
 };

@@ -4,7 +4,7 @@
  */
 
 import { USE_MOCK_STATE } from "./config";
-import type { GameState, Territory } from "./shared/game-state";
+import type { GameState, Territory, SkillDataPayload, CardStatsPayload } from "./shared/game-state";
 import { DEFAULT_GAME_STATE } from "./shared/game-state";
 import { getMockGameState } from "./shared/mock-state";
 export { USE_MOCK_STATE, WS_URL } from "./config";
@@ -28,8 +28,8 @@ export interface FormedUnit {
   id: string;
   name: string;
   indices: [number, number, number];
-  /** 3体のキャラカードエナジーの合計 */
-  energy: number;
+  /** 3体のキャラカードの魔獣数の合計 */
+  monster_count: number;
   /** 3体のキャラカードSPEEDの平均 */
   avgSpeed: number;
 }
@@ -42,9 +42,9 @@ export function getNextFormedUnitId(): number { return nextFormedUnitId++; }
 export let formationSelected: number[] = [];
 export function setFormationSelected(sel: number[]) { formationSelected = sel; }
 
-/** 本拠地の各キャラ（体）が持つエナジー。インデックス = 体の番号 */
-export let bodyEnergies: number[] = [];
-export function setBodyEnergies(e: number[]) { bodyEnergies = e; }
+/** 本拠地の各キャラ（体）の魔獣数。インデックス = 体の番号 */
+export let bodyMonsterCounts: number[] = [];
+export function setBodyMonsterCounts(c: number[]) { bodyMonsterCounts = c; }
 
 
 
@@ -53,12 +53,6 @@ export let bodySpeeds: number[] = [];
 export function setBodySpeeds(s: number[]) { bodySpeeds = s; }
 
 // --- 移動 ---
-export interface SkillDataPayload {
-  passive_id?: string;
-  active_id: string;
-  unique_id?: string;
-}
-
 export interface TravelingUnit {
   id: string;
   unitId: string;
@@ -68,10 +62,13 @@ export interface TravelingUnit {
   targetId: string;
   fromId?: string;
   count: number;
-  energyPerBody: number[];
+  monstersPerBody: number[];
   speedPerBody: number[];
   bodyNames: string[];
   skillsPerBody: SkillDataPayload[];
+  statsPerBody: CardStatsPayload[];
+  /** getPlayerOwnedCards 上のインデックス（攻撃時スタミナ・XP） */
+  ownedCardIndices?: number[];
   departureTime: number;
   arrivalTime: number;
 }
@@ -85,7 +82,7 @@ export let travelIntervalId: ReturnType<typeof setInterval> | null = null;
 export function setTravelIntervalId(id: ReturnType<typeof setInterval> | null) { travelIntervalId = id; }
 
 // --- 画面状態 ---
-export type Screen = "map" | "home" | "history" | "inventory";
+export type Screen = "map" | "home" | "history" | "inventory" | "market" | "alliance" | "pack" | "status" | "ranking";
 export let currentScreen: Screen = "map";
 export function setCurrentScreen(s: Screen) { currentScreen = s; }
 

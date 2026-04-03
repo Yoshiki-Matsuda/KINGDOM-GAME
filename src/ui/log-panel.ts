@@ -7,7 +7,6 @@ import { escapeHtml } from "../utils";
 
 let historyList: HTMLDivElement;
 let detailModal: HTMLDivElement;
-let battleTimestamps = new Map<number, Date>();
 
 /** ログの種類を判定 */
 type LogType = 
@@ -32,25 +31,39 @@ interface ActionGroup {
   lines: string[];
 }
 
+/** サーバーが埋め込む [ts:ミリ秒] プレフィックスを抽出し、本文とタイムスタンプを返す */
+function parseLogLine(raw: string): { text: string; tsMs: number | null } {
+  const m = raw.match(/^\[ts:(\d+)\]/);
+  if (m) {
+    return { text: raw.slice(m[0].length), tsMs: parseInt(m[1], 10) };
+  }
+  return { text: raw, tsMs: null };
+}
+
 function classifyLog(line: string): LogType {
   if (line.startsWith("◆◆") || line.includes("固有スキル")) return "skill_unique";
   if (line.startsWith("◆") || line.startsWith("★")) return "skill_passive";
   if (line.includes("が発動")) return "skill_active";
   if (line.startsWith("  →")) return "skill_effect";
-  // 個別攻撃: 「1位目: 〇〇が△△に攻撃」または「〇〇が△△に攻撃」
+  if (line.startsWith("【") && line.includes("侵攻戦】")) return "battle_start";
+  if (/ユニット\d+が.+を攻撃しました/.test(line) || line.includes("へ侵攻開始")) return "battle_start";
+  if (
+    line.includes("占領しました") ||
+    line.includes("攻撃失敗") ||
+    line.includes("防衛に成功") ||
+    line.includes("ターン経過") ||
+    line.includes("占領には至らなかった")
+  ) {
+    return "battle_end";
+  }
   if (line.includes("に攻撃") || line.includes("攻撃！")) return "attack";
   if (line.includes("撃破") || line.includes("倒れた")) return "defeat";
   if (line.includes("ダメージ")) return "damage";
   if (line.includes("回復") || line.includes("吸収")) return "heal";
-  if (line.includes("毒") || line.includes("炎上") || line.includes("凍結") || 
+  if (line.includes("毒") || line.includes("炎上") || line.includes("凍結") ||
       line.includes("気絶") || line.includes("沈黙") || line.includes("シールド") ||
       line.includes("無敵") || line.includes("バフ") || line.includes("マーク")) return "status";
-  // 戦闘開始（新形式・旧形式両対応）
-  if (line.startsWith("【") && line.includes("侵攻戦】")) return "battle_start";
-  // 「ユニットXが〇〇を攻撃しました」形式 = 戦闘開始
-  if (/ユニット\d+が.+を攻撃しました/.test(line) || line.includes("へ侵攻開始")) return "battle_start";
-  // 戦闘終了
-  if (line.includes("占領しました") || line.includes("攻撃失敗") || line.includes("防衛に成功")) return "battle_end";
+  if (/^--- Turn \d+ ---$/.test(line) || line.startsWith("--- 戦闘フェーズ ---") || line.startsWith("--- スキル発動フェーズ ---")) return "normal";
   return "normal";
 }
 
@@ -80,23 +93,35 @@ function isLootRelatedLine(line: string): boolean {
   return false;
 }
 
+/** 同一戦闘とみなすタイムスタンプの最大差（ミリ秒） */
+const BATTLE_GROUP_GAP_MS = 5000;
+
 /** ログを戦闘履歴にパース */
-function parseLogsToHistory(logs: string[]): BattleHistory[] {
+function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
   const histories: BattleHistory[] = [];
   let currentBattle: BattleHistory | null = null;
   let currentAction: ActionGroup | null = null;
   let battleId = 0;
   let postBattleLootMode = false;
+  /** 現在の戦闘グループの基準タイムスタンプ */
+  let currentBattleTsMs: number | null = null;
 
-  for (const line of logs) {
+  /** 進行中のカードを確定して histories へ追加 */
+  function finalizeCurrent() {
+    if (!currentBattle) return;
+    if (currentAction) currentBattle.actions.push(currentAction);
+    histories.push(currentBattle);
+    currentBattle = null;
+    currentAction = null;
+    currentBattleTsMs = null;
+  }
+
+  for (let lineIdx = 0; lineIdx < rawLogs.length; lineIdx++) {
+    const { text: line, tsMs } = parseLogLine(rawLogs[lineIdx]);
     const type = classifyLog(line);
 
-    // 占領/失敗の直後に続く行は同一カードにまとめる。それ以外はここで戦闘を確定する
     if (postBattleLootMode && currentBattle && !isLootRelatedLine(line) && type !== "battle_start") {
-      if (currentAction) currentBattle.actions.push(currentAction);
-      histories.push(currentBattle);
-      currentBattle = null;
-      currentAction = null;
+      finalizeCurrent();
       postBattleLootMode = false;
     }
 
@@ -143,33 +168,49 @@ function parseLogsToHistory(logs: string[]): BattleHistory[] {
       continue;
     }
 
-    // 新しい戦闘の開始
+    // タイムスタンプが大きく離れていたら別イベントとして分割
+    if (
+      currentBattle &&
+      tsMs != null &&
+      currentBattleTsMs != null &&
+      Math.abs(tsMs - currentBattleTsMs) > BATTLE_GROUP_GAP_MS &&
+      type !== "battle_end"
+    ) {
+      // battle_start は自身の分割ロジックがあるのでここではスキップ
+      if (type !== "battle_start") {
+        finalizeCurrent();
+        postBattleLootMode = false;
+      }
+    }
+
     if (type === "battle_start") {
       postBattleLootMode = false;
+      let preludeActions: ActionGroup[] = [];
       if (currentBattle) {
         if (currentAction) currentBattle.actions.push(currentAction);
-        histories.push(currentBattle);
+        currentAction = null;
+        if (currentBattle.title === "戦闘" && currentBattle.result === "ongoing") {
+          preludeActions = currentBattle.actions;
+        } else {
+          histories.push(currentBattle);
+        }
+        currentBattle = null;
+        currentBattleTsMs = null;
       }
-      
-      // マス名と座標を抽出
+
       let title = "戦闘";
-      
-      // 新形式: 【マス名<col,row>侵攻戦】 → 「マス名<col,row>」を抽出
       const newFormatMatch = line.match(/【(.+?<\d+,\d+>)侵攻戦】/);
       if (newFormatMatch) {
         title = newFormatMatch[1];
       } else {
-        // 旧形式: 【マス名侵攻戦】
         const oldFormatMatch = line.match(/【(.+?)侵攻戦】/);
         if (oldFormatMatch) {
           title = oldFormatMatch[1];
         } else {
-          // 形式: ユニットXが△△を攻撃しました → △△を抽出
           const attackMatch = line.match(/ユニット\d+が(.+?)を攻撃しました/);
           if (attackMatch) {
             title = attackMatch[1];
           } else {
-            // 形式: 〇〇へ侵攻開始 → 〇〇を抽出
             const invasionMatch = line.match(/が(.+?)へ侵攻/);
             if (invasionMatch) {
               title = invasionMatch[1];
@@ -177,18 +218,14 @@ function parseLogsToHistory(logs: string[]): BattleHistory[] {
           }
         }
       }
-      
-      // 時刻を記録
-      if (!battleTimestamps.has(battleId)) {
-        battleTimestamps.set(battleId, new Date());
-      }
-      
+
+      currentBattleTsMs = tsMs ?? Date.now();
       currentBattle = {
         id: battleId++,
         title: title,
-        timestamp: battleTimestamps.get(battleId - 1) ?? new Date(),
+        timestamp: new Date(currentBattleTsMs),
         result: "ongoing",
-        actions: [],
+        actions: preludeActions.slice(),
       };
       currentAction = {
         type: "phase",
@@ -200,35 +237,44 @@ function parseLogsToHistory(logs: string[]): BattleHistory[] {
     }
 
     if (!currentBattle) {
+      currentBattleTsMs = tsMs ?? Date.now();
       currentBattle = {
         id: battleId++,
         title: "戦闘",
-        timestamp: new Date(),
+        timestamp: new Date(currentBattleTsMs),
         result: "ongoing",
         actions: [],
       };
     }
 
-    // 戦闘終了（戦利品はこの直後に続く同一侵攻のログとして扱う）
     if (type === "battle_end") {
       if (currentAction) {
         currentBattle.actions.push(currentAction);
       }
       const isVictory = line.includes("占領しました");
-      currentBattle.result = isVictory ? "victory" : "defeat";
+      const isPartialOcc = line.includes("占領には至らなかった");
+      if (isVictory) {
+        currentBattle.result = "victory";
+      } else {
+        currentBattle.result = "defeat";
+      }
       currentAction = {
         type: "result",
-        title: isVictory ? "占領成功" : "攻撃失敗",
-        icon: isVictory ? "🏆" : "💀",
+        title: isVictory ? "占領成功" : isPartialOcc ? "敵撃破・未占領" : "攻撃失敗",
+        icon: isVictory ? "🏆" : isPartialOcc ? "🛡️" : "💀",
         lines: [line],
       };
       currentBattle.actions.push(currentAction);
       currentAction = null;
-      postBattleLootMode = true;
+      postBattleLootMode = isVictory;
+      if (!isVictory) {
+        histories.push(currentBattle);
+        currentBattle = null;
+        currentBattleTsMs = null;
+      }
       continue;
     }
 
-    // スキル発動（新しいアクショングループ）
     if (type === "skill_passive" || type === "skill_active" || type === "skill_unique") {
       if (currentAction) {
         currentBattle.actions.push(currentAction);
@@ -244,7 +290,6 @@ function parseLogsToHistory(logs: string[]): BattleHistory[] {
       continue;
     }
 
-    // 攻撃（新しいアクショングループ）
     if (type === "attack") {
       if (currentAction) {
         currentBattle.actions.push(currentAction);
@@ -259,7 +304,6 @@ function parseLogsToHistory(logs: string[]): BattleHistory[] {
       continue;
     }
 
-    // それ以外は現在のアクションに追加
     if (currentAction) {
       currentAction.lines.push(line);
     } else {
@@ -272,7 +316,6 @@ function parseLogsToHistory(logs: string[]): BattleHistory[] {
     }
   }
 
-  // 残りを追加
   if (currentBattle) {
     if (currentAction) currentBattle.actions.push(currentAction);
     histories.push(currentBattle);
@@ -346,7 +389,6 @@ function showBattleDetail(battle: BattleHistory): void {
   
   detailModal.classList.add("is-open");
   
-  // アクショングループの折りたたみ
   detailModal.querySelectorAll(".action-group").forEach(group => {
     const header = group.querySelector(".action-header");
     header?.addEventListener("click", () => {
@@ -354,7 +396,6 @@ function showBattleDetail(battle: BattleHistory): void {
     });
   });
   
-  // モーダルを閉じる
   detailModal.querySelectorAll("[data-close]").forEach(el => {
     el.addEventListener("click", (e) => {
       if (e.target === el) {
@@ -371,12 +412,10 @@ export function createLogElement(): HTMLDivElement {
   wrapper.className = "history-screen";
   wrapper.style.display = "none";
   
-  // 詳細モーダル
   detailModal = document.createElement("div");
   detailModal.className = "battle-detail-modal";
   document.body.appendChild(detailModal);
   
-  // ヘッダー
   const header = document.createElement("div");
   header.className = "history-header";
   header.innerHTML = `
@@ -386,14 +425,12 @@ export function createLogElement(): HTMLDivElement {
     </div>
   `;
   
-  // 履歴リスト
   historyList = document.createElement("div");
   historyList.className = "history-list";
   
   wrapper.appendChild(header);
   wrapper.appendChild(historyList);
   
-  // カードクリックイベント
   historyList.addEventListener("click", (e) => {
     const card = (e.target as HTMLElement).closest(".history-card");
     if (card) {
@@ -410,10 +447,6 @@ export function createLogElement(): HTMLDivElement {
 
 export function renderLog(): void {
   const logs = gameState.log ?? [];
-  
-  // 履歴をパース
   battleHistories = parseLogsToHistory(logs);
-  
-  // 履歴リスト描画（新しい順）
   historyList.innerHTML = battleHistories.slice().reverse().map(renderHistoryCard).join("");
 }

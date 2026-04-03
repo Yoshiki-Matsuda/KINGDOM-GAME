@@ -6,7 +6,7 @@ import type { PendingUnitAction } from "../store";
 import {
   ws,
   formedUnitsList,
-  bodyEnergies,
+  bodyMonsterCounts,
   bodySpeeds,
   pendingUnitAction, setPendingUnitAction,
   setAttackSourceId,
@@ -14,7 +14,9 @@ import {
   getNextTravelingId,
 } from "../store";
 import type { TravelingUnit } from "../store";
-import { BODIES_PER_UNIT, DEFAULT_BODY_ENERGY, DEFAULT_BODY_SPEED, getBodyDisplayName, getCharacterSkillData } from "../game/characters";
+import { BODIES_PER_UNIT, DEFAULT_BODY_MONSTER_COUNT, DEFAULT_BODY_SPEED, getBodyDisplayName, getCharacterSkillData, getCharacterStats } from "../game/characters";
+import { gameState } from "../store";
+import { getPlayerOwnedCards } from "../shared/game-state";
 import { getDistanceFromHome, getTravelTimeMs, startTravelIntervalIfNeeded } from "../game/travel";
 import { closeMenu } from "./context-menu";
 import { showFormationScreen } from "./formation-screen";
@@ -33,7 +35,7 @@ export function createUnitSelectElement(): HTMLDivElement {
   unitSelectEl.className = "unit-select-overlay";
   unitSelectEl.innerHTML = `
     <div class="unit-select-modal">
-      <div class="unit-select-title" data-unit-title>エナジーを選択</div>
+      <div class="unit-select-title" data-unit-title>ユニットを選択</div>
       <div class="unit-select-panel-form" data-unit-panel-form style="display:none">
         <div class="unit-select-troops" data-unit-troops>編成済みユニットから送るユニットを選んでください</div>
         <div class="unit-select-unit-list" data-unit-list></div>
@@ -112,6 +114,47 @@ export function showUnitSelect(pending: PendingUnitAction): void {
 
   unitSelectEl.classList.add("is-open");
   bindUnitSelectEscape();
+}
+
+/**
+ * 編成スロットの体インデックス（≒そのマスのキャラ定義ID）に対応する `owned_cards` 配列上のインデックス。
+ * 完全一致が無い（例: 編成0,1,2なのに所持がゴブリンだけ）でも、負担分散で割り当てて攻撃可能にする。
+ */
+function resolveOwnedCardIndices(bodyIndices: [number, number, number], owned: number[]): number[] | null {
+  if (owned.length === 0) return null;
+
+  const usage = new Map<number, number>();
+  const out: number[] = [];
+
+  for (let slot = 0; slot < 3; slot++) {
+    const bi = bodyIndices[slot];
+    let bestJ = -1;
+    let bestUses = Infinity;
+
+    for (let j = 0; j < owned.length; j++) {
+      if (owned[j] !== bi) continue;
+      const u = usage.get(j) ?? 0;
+      if (u < bestUses) {
+        bestUses = u;
+        bestJ = j;
+      }
+    }
+
+    if (bestJ < 0) {
+      for (let j = 0; j < owned.length; j++) {
+        const u = usage.get(j) ?? 0;
+        if (bestJ < 0 || u < bestUses) {
+          bestUses = u;
+          bestJ = j;
+        }
+      }
+    }
+
+    usage.set(bestJ, (usage.get(bestJ) ?? 0) + 1);
+    out.push(bestJ);
+  }
+
+  return out;
 }
 
 export function closeUnitSelect(): void {
@@ -196,10 +239,32 @@ function setupUnitSelect(): void {
       render();
       return;
     }
-    const energyPerBody = unit.indices.map((i) => bodyEnergies[i] ?? DEFAULT_BODY_ENERGY);
+    const monstersPerBody = unit.indices.map((i) => bodyMonsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT);
     const speedPerBody = unit.indices.map((i) => bodySpeeds[i] ?? DEFAULT_BODY_SPEED);
     const bodyNames = unit.indices.map((i) => getBodyDisplayName(i));
     const skillsPerBody = unit.indices.map((i) => getCharacterSkillData(i));
+    const statsPerBody = unit.indices.map((i) => {
+      const s = getCharacterStats(i);
+      return {
+        monster_count: s.monster_count,
+        speed: s.speed,
+        attack: s.attack,
+        intelligence: s.intelligence,
+        defense: s.defense,
+        magic_defense: s.magicDefense,
+        range: s.range,
+        cost: s.cost,
+        occupation_power: s.occupationPower,
+      };
+    });
+    const owned = getPlayerOwnedCards(gameState);
+    const ownedCardIndices = resolveOwnedCardIndices(unit.indices, owned);
+    if (!ownedCardIndices) {
+      console.warn("[kingdom] 所持カードが0枚のため出撃できません。", { unitIndices: unit.indices });
+      closeUnitSelect();
+      render();
+      return;
+    }
     const targetId = pending.type === "attack" ? pending.toId : pending.territoryId;
     const distance = getDistanceFromHome(targetId);
     const travelTimeMs = getTravelTimeMs(distance, unit.avgSpeed);
@@ -212,10 +277,12 @@ function setupUnitSelect(): void {
       targetId,
       fromId: pending.type === "attack" ? pending.fromId : undefined,
       count,
-      energyPerBody,
+      monstersPerBody,
       speedPerBody,
       bodyNames,
       skillsPerBody,
+      statsPerBody,
+      ownedCardIndices,
       departureTime: Date.now(),
       arrivalTime: Date.now() + travelTimeMs,
     };

@@ -4,15 +4,15 @@
  */
 
 import {
-  bodyEnergies, bodySpeeds,
+  bodyMonsterCounts, bodySpeeds,
   formedUnitsList, setFormedUnitsList,
   getNextFormedUnitId,
   gameState,
   render,
 } from "../store";
-import { getBodyDisplayName, getCharacterIllustrationPath } from "../game/characters";
+import { getBodyDisplayName, getCharacterIllustrationPath, getCharacterStats } from "../game/characters";
 import { getHomeTroops, validateFormedUnits, recalcUnitStats } from "../game/formation";
-import { getUnitCapacity } from "../game/facility-selectors";
+import { getEffectiveUnitCostCap, getUnitCapacity } from "../game/facility-selectors";
 import { buildFormationCardDetailHtml } from "../formation-card-detail";
 import { appendFormedUnit } from "../store-actions";
 import { escapeHtml } from "../utils";
@@ -27,6 +27,14 @@ let editingSlotIndex: 0 | 1 | 2 | null = null;
 /** ユニット上限（施設ボーナス込み） */
 function getMaxUnits(): number {
   return Math.max(1, 1 + getUnitCapacity(gameState));
+}
+
+function unitFilledCostSum(indices: [number, number, number]): number {
+  let s = 0;
+  for (const i of indices) {
+    if (i >= 0) s += getCharacterStats(i).cost;
+  }
+  return s;
 }
 
 export function createFormationElement(): HTMLDivElement {
@@ -160,11 +168,12 @@ function renderCharacterPicker(): void {
 function renderFormationContent(): void {
   const homeTroops = getHomeTroops();
   const maxUnits = getMaxUnits();
+  const costCap = getEffectiveUnitCostCap(gameState);
   const troopsEl = formationEl.querySelector("[data-formation-troops]")!;
   const listEl = formationEl.querySelector("[data-formation-unit-list]")!;
   const addBtn = formationEl.querySelector<HTMLButtonElement>("[data-formation-add-unit]")!;
 
-  troopsEl.textContent = `本拠地: ${homeTroops} 体`;
+  troopsEl.textContent = `本拠地: ${homeTroops} 体・コスト上限 ${costCap.toFixed(1)}`;
   addBtn.disabled = formedUnitsList.length >= maxUnits;
 
   listEl.innerHTML = "";
@@ -175,17 +184,29 @@ function renderFormationContent(): void {
 
     const header = document.createElement("div");
     header.className = "formation-unit-row-header";
-    header.innerHTML = `<span class="formation-unit-row-name">${escapeHtml(u.name)}</span>`;
+    const filledCost = unitFilledCostSum(u.indices);
+    const costHint = u.indices.some((i) => i >= 0)
+      ? ` <span class="formation-unit-cost">コスト ${filledCost.toFixed(1)} / ${costCap.toFixed(1)}</span>`
+      : "";
+    header.innerHTML = `<span class="formation-unit-row-name">${escapeHtml(u.name)}</span>${costHint}`;
     row.appendChild(header);
 
     const slots = document.createElement("div");
     slots.className = "formation-unit-slots";
+    const POSITION_LABELS = ["FRONT", "BACK", "LEADER"] as const;
+    const POSITION_RANGE_HINT = ["射程1+", "射程2+", "射程3で狙われる"] as const;
     for (let s = 0; s < 3; s++) {
       const slot = document.createElement("button");
       slot.type = "button";
       slot.className = "formation-slot";
       slot.dataset.unitId = u.id;
       slot.dataset.slotIndex = String(s);
+
+      const posLabel = document.createElement("div");
+      posLabel.className = "formation-slot-position";
+      posLabel.textContent = POSITION_LABELS[s];
+      slot.appendChild(posLabel);
+
       const idx = u.indices[s];
       if (idx >= 0) {
         slot.dataset.charIndex = String(idx);
@@ -199,7 +220,10 @@ function renderFormationContent(): void {
         slot.appendChild(nameSpan);
       } else {
         slot.classList.add("formation-slot-empty");
-        slot.innerHTML = '<span class="formation-slot-plus">+</span>';
+        const hint = document.createElement("div");
+        hint.className = "formation-slot-hint";
+        hint.innerHTML = `<span class="formation-slot-plus">+</span><span class="formation-slot-range-hint">${POSITION_RANGE_HINT[s]}</span>`;
+        slot.appendChild(hint);
       }
       slots.appendChild(slot);
     }
@@ -223,7 +247,7 @@ function setupFormationScreen(): void {
       id,
       name,
       indices: [-1, -1, -1],
-      energy: 0,
+      monster_count: 0,
       avgSpeed: 0,
     });
     renderFormationContent();
@@ -353,11 +377,19 @@ function setupFormationScreen(): void {
 
     const newIndices: [number, number, number] = [...unit.indices];
     newIndices[editingSlotIndex] = charIndex;
-    const { energy, avgSpeed } = recalcUnitStats(newIndices, bodyEnergies, bodySpeeds);
+    const tryCost = unitFilledCostSum(newIndices);
+    const cap = getEffectiveUnitCostCap(gameState);
+    if (tryCost > cap + 0.0001) {
+      alert(
+        `ユニットコスト上限（${cap.toFixed(1)}）を超えます（この編成だと合計${tryCost.toFixed(1)}）。別のキャラにしてください。`,
+      );
+      return;
+    }
+    const { monster_count, avgSpeed } = recalcUnitStats(newIndices, bodyMonsterCounts, bodySpeeds);
 
     const idx = formedUnitsList.findIndex((u) => u.id === editingUnitId);
     const updated = [...formedUnitsList];
-    updated[idx] = { ...unit, indices: newIndices, energy, avgSpeed };
+    updated[idx] = { ...unit, indices: newIndices, monster_count, avgSpeed };
     setFormedUnitsList(updated);
 
     closeCharacterPicker();

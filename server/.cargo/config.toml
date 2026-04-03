@@ -1,0 +1,4 @@
+# Windows で debug\kingdom-server.exe が他プロセスに掴まれて
+# 「failed to remove … os error 32」になる場合、既定の target/ とは別ディレクトリでビルドする。
+[build]
+target-dir = "target-local"

@@ -38,7 +38,7 @@ export function renderAvailableUnits(container: Element, units: typeof formedUni
     const label = document.createElement("label");
     label.className = "unit-select-unit-item";
     const memberNames = unit.indices.map((index) => getBodyDisplayName(index)).join("・");
-    label.innerHTML = `<input type="radio" name="unit-select-one" data-unit-id="${unit.id}" /> <span>${escapeHtml(unit.name)}（${escapeHtml(memberNames)}） エナジー${unit.energy} SPEED${unit.avgSpeed.toFixed(1)}</span>`;
+    label.innerHTML = `<input type="radio" name="unit-select-one" data-unit-id="${unit.id}" /> <span>${escapeHtml(unit.name)}（${escapeHtml(memberNames)}） 魔獣数${unit.monster_count} SPEED${unit.avgSpeed.toFixed(1)}</span>`;
     container.appendChild(label);
   });
 }

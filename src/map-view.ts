@@ -14,6 +14,7 @@ import {
     HOME_TERRITORY_ID,
     formatTerritoryId,
     isWithinWorldGrid,
+    tryParseTerritoryId,
 } from "./game/territories";
 import {
     coordToScreen,
@@ -43,40 +44,40 @@ interface RuinVisual {
 
 const RUIN_VISUALS: Record<string, RuinVisual> = {
     // ノーマル遺跡
-    "石の番人": { color: 0x8b7355, icon: "🗿", name: "石の番人" },
-    "亡霊の群れ": { color: 0x6b5b95, icon: "👻", name: "亡霊の群れ" },
-    "骸骨兵団": { color: 0x4a4a4a, icon: "💀", name: "骸骨兵団" },
-    "スライムの巣": { color: 0x7eb77f, icon: "🟢", name: "スライムの巣" },
-    "蜘蛛の巣窟": { color: 0x5d4e37, icon: "🕸️", name: "蜘蛛の巣窟" },
-    "炎の回廊": { color: 0xb8420f, icon: "🔥", name: "炎の回廊" },
-    "氷結の間": { color: 0xa8d8ea, icon: "❄️", name: "氷結の間" },
-    "小悪魔の遊び場": { color: 0x8b0000, icon: "😈", name: "小悪魔の遊び場" },
+    "石の番人": { color: 0x302a20, icon: "🗿", name: "石の番人" },
+    "亡霊の群れ": { color: 0x1e1a30, icon: "👻", name: "亡霊の群れ" },
+    "骸骨兵団": { color: 0x1a1a1a, icon: "💀", name: "骸骨兵団" },
+    "スライムの巣": { color: 0x1a2a1a, icon: "🟢", name: "スライムの巣" },
+    "蜘蛛の巣窟": { color: 0x201a12, icon: "🕸️", name: "蜘蛛の巣窟" },
+    "炎の回廊": { color: 0x381808, icon: "🔥", name: "炎の回廊" },
+    "氷結の間": { color: 0x142830, icon: "❄️", name: "氷結の間" },
+    "小悪魔の遊び場": { color: 0x300808, icon: "😈", name: "小悪魔の遊び場" },
     // レア遺跡
-    "闇の魔術師団": { color: 0x2d1b4e, icon: "🧙", name: "闇の魔術師団" },
-    "宝箱の罠": { color: 0xc9b037, icon: "📦", name: "宝箱の罠" },
-    "混成警備隊": { color: 0x696969, icon: "⚔️", name: "混成警備隊" },
-    "闇と骨の同盟": { color: 0x3d3d3d, icon: "☠️", name: "闇と骨の同盟" },
-    "呪われた武具庫": { color: 0x4b0082, icon: "🛡️", name: "呪われた武具庫" },
-    "暗殺者の隠れ家": { color: 0x1a1a2e, icon: "🗡️", name: "暗殺者の隠れ家" },
-    "精霊の聖域": { color: 0x87ceeb, icon: "✨", name: "精霊の聖域" },
-    "ガーゴイルの塔": { color: 0x708090, icon: "🗼", name: "ガーゴイルの塔" },
-    "死者の墓所": { color: 0x2f4f4f, icon: "⚰️", name: "死者の墓所" },
-    "クリスタルの洞窟": { color: 0x9370db, icon: "💎", name: "クリスタルの洞窟" },
-    "雷鳥の巣": { color: 0xffd700, icon: "⚡", name: "雷鳥の巣" },
-    "地底の主": { color: 0x654321, icon: "🐛", name: "地底の主" },
+    "闇の魔術師団": { color: 0x180e28, icon: "🧙", name: "闇の魔術師団" },
+    "宝箱の罠": { color: 0x2a2410, icon: "📦", name: "宝箱の罠" },
+    "混成警備隊": { color: 0x202020, icon: "⚔️", name: "混成警備隊" },
+    "闇と骨の同盟": { color: 0x161616, icon: "☠️", name: "闇と骨の同盟" },
+    "呪われた武具庫": { color: 0x1a0830, icon: "🛡️", name: "呪われた武具庫" },
+    "暗殺者の隠れ家": { color: 0x0e0e18, icon: "🗡️", name: "暗殺者の隠れ家" },
+    "精霊の聖域": { color: 0x142028, icon: "✨", name: "精霊の聖域" },
+    "ガーゴイルの塔": { color: 0x1e2028, icon: "🗼", name: "ガーゴイルの塔" },
+    "死者の墓所": { color: 0x141e1e, icon: "⚰️", name: "死者の墓所" },
+    "クリスタルの洞窟": { color: 0x1e1430, icon: "💎", name: "クリスタルの洞窟" },
+    "雷鳥の巣": { color: 0x2a2810, icon: "⚡", name: "雷鳥の巣" },
+    "地底の主": { color: 0x201810, icon: "🐛", name: "地底の主" },
     // ボス遺跡
-    "守護者の間": { color: 0x8b4513, icon: "🏛️", name: "守護者の間" },
-    "暗黒の祭壇": { color: 0x1a0a2e, icon: "🌑", name: "暗黒の祭壇" },
-    "最深部の番人": { color: 0x4a0e0e, icon: "👁️", name: "最深部の番人" },
-    "竜の墓場": { color: 0x8b0000, icon: "🐉", name: "竜の墓場" },
-    "死霊王の玉座": { color: 0x0d0d0d, icon: "👑", name: "死霊王の玉座" },
-    "巨神の神殿": { color: 0xc9b037, icon: "🏛️", name: "巨神の神殿" },
-    "混沌の深淵": { color: 0x0f0f23, icon: "🌀", name: "混沌の深淵" },
-    "不死の軍団": { color: 0x1c1c1c, icon: "💀", name: "不死の軍団" },
-    "終焉の間": { color: 0x0a0a0a, icon: "💀", name: "終焉の間" },
+    "守護者の間": { color: 0x281a0e, icon: "🏛️", name: "守護者の間" },
+    "暗黒の祭壇": { color: 0x100818, icon: "🌑", name: "暗黒の祭壇" },
+    "最深部の番人": { color: 0x200808, icon: "👁️", name: "最深部の番人" },
+    "竜の墓場": { color: 0x300808, icon: "🐉", name: "竜の墓場" },
+    "死霊王の玉座": { color: 0x0a0a0a, icon: "👑", name: "死霊王の玉座" },
+    "巨神の神殿": { color: 0x282010, icon: "🏛️", name: "巨神の神殿" },
+    "混沌の深淵": { color: 0x0a0a14, icon: "🌀", name: "混沌の深淵" },
+    "不死の軍団": { color: 0x101010, icon: "💀", name: "不死の軍団" },
+    "終焉の間": { color: 0x080808, icon: "💀", name: "終焉の間" },
 };
 
-const DEFAULT_RUIN_VISUAL: RuinVisual = { color: 0x6b6b6b, icon: "🏚️", name: "遺跡" };
+const DEFAULT_RUIN_VISUAL: RuinVisual = { color: 0x1a1a1a, icon: "🏚️", name: "遺跡" };
 
 /** 遺跡の見た目を取得 */
 function getRuinVisual(formationName: string): RuinVisual {
@@ -88,16 +89,28 @@ let _tileContainer: Container | null = null;
 let _onTerritoryClick: ((id: string, t: any, x: number, y: number) => void) | null = null;
 let _lastTerritoryMap: Map<string, any> = new Map();
 
-/** 地形レベル（1-6）に対応する色（テクスチャがない時のフォールバック） */
+let _terrainGraphics: Graphics | null = null;
+let _overlayContainer: Container | null = null;
+let _prevTerritoryJSON = "";
+let _visible = false;
+
+const DRAW_ORDER: { col: number; row: number }[] = [];
+for (let sum = 0; sum < GRID_COLS + GRID_ROWS - 1; sum++) {
+    for (let row = 0; row < GRID_ROWS; row++) {
+        const col = sum - row;
+        if (col >= 0 && col < GRID_COLS) DRAW_ORDER.push({ col, row });
+    }
+}
+
 function terrainColor(level: number): number {
     switch (level) {
-        case 1: return 0xeeeeee; // 平原
-        case 2: return 0xddddaa; // 丘陵
-        case 3: return 0xaaddaa; // 森
-        case 4: return 0xaaaaaa; // 山地
-        case 5: return 0x888888; // 山岳
-        case 6: return 0x4488cc; // 川
-        default: return 0xcccccc;
+        case 1: return 0x5a6a38;
+        case 2: return 0x8a7a48;
+        case 3: return 0x2e5a28;
+        case 4: return 0x6a6a6a;
+        case 5: return 0x8a8a9a;
+        case 6: return 0x3a6a7a;
+        default: return 0x4a4838;
     }
 }
 
@@ -142,7 +155,7 @@ export async function initMapView(
     }
 ) {
     const app = new Application();
-    await app.init({ resizeTo: window, backgroundColor: 0x111111 });
+    await app.init({ resizeTo: window, backgroundColor: 0x0a0a0f });
     // @ts-ignore
     container.appendChild(app.canvas || app.view);
 
@@ -154,7 +167,12 @@ export async function initMapView(
     _tileContainer = new Container();
     _tileContainer.eventMode = "static";
 
-    // アイソメトリックで中央(24,24)が画面中央に来るように
+    _terrainGraphics = new Graphics();
+    _tileContainer.addChild(_terrainGraphics);
+
+    _overlayContainer = new Container();
+    _tileContainer.addChild(_overlayContainer);
+
     const centerScreen = coordToScreen(24, 24, TILE_DIMENSIONS);
     _tileContainer.x = app.screen.width / 2 - centerScreen.x;
     _tileContainer.y = app.screen.height / 2 - centerScreen.y;
@@ -230,28 +248,34 @@ export async function initMapView(
     app.stage.on("pointerupoutside", onUp);
 }
 
+export function setMapVisible(v: boolean) { _visible = v; }
+
 export function updateMapView(
     state: GameState,
     travelingDestinations?: { targetId: string; secLeft: number; unitNames: string[] }[]
 ) {
-    if (!_app || !_tileContainer) return;
+    if (!_app || !_tileContainer || !_terrainGraphics || !_overlayContainer) return;
+    if (!_visible) return;
 
-    _tileContainer.removeChildren();
     _lastTerritoryMap = new Map(state.territories.map(t => [t.id, t]));
 
-    const g = new Graphics();
-    _tileContainer.addChild(g);
-
-    // アイソメトリック: 奥( row+col 小) → 手前( row+col 大) の順で描画
-    const order: { col: number; row: number }[] = [];
-    for (let sum = 0; sum < GRID_COLS + GRID_ROWS - 1; sum++) {
-        for (let row = 0; row < GRID_ROWS; row++) {
-            const col = sum - row;
-            if (col >= 0 && col < GRID_COLS) order.push({ col, row });
-        }
+    const territoryJSON = JSON.stringify(state.territories);
+    if (territoryJSON !== _prevTerritoryJSON) {
+        _prevTerritoryJSON = territoryJSON;
+        redrawTerrain();
     }
 
-    for (const { col, row } of order) {
+    redrawOverlay(travelingDestinations);
+}
+
+function redrawTerrain() {
+    const g = _terrainGraphics!;
+    const container = _overlayContainer!;
+    g.clear();
+
+    while (container.children.length > 0) container.removeChildAt(0);
+
+    for (const { col, row } of DRAW_ORDER) {
         const id = formatTerritoryId(col, row);
         const t = _lastTerritoryMap.get(id);
         const level = t?.level ?? 1;
@@ -260,19 +284,16 @@ export function updateMapView(
         const { x: cx, y: cy } = coordToScreen(col, row, TILE_DIMENSIONS);
         const points = diamondPoints(cx, cy, TILE_DIMENSIONS);
 
-        // 遺跡マスは専用の色を使用
         if (isRuin) {
             const ruinVisual = getRuinVisual(t.ruin.formation_name);
             g.poly(points, true).fill(ruinVisual.color);
 
-            // 難易度に応じた枠線色
-            const diffColor = t.ruin.difficulty === "extreme" ? 0xff0000 
-                : t.ruin.difficulty === "hard" ? 0xff8800 
-                : t.ruin.difficulty === "normal" ? 0xffcc00 
-                : 0x88ff88;
-            g.poly(points, true).stroke({ width: 2, color: diffColor });
+            const diffColor = t.ruin.difficulty === "extreme" ? 0x8a1a1a
+                : t.ruin.difficulty === "hard" ? 0x8a4010
+                : t.ruin.difficulty === "normal" ? 0x6a5a20
+                : 0x2a5a2a;
+            g.poly(points, true).stroke({ width: 2, color: diffColor, alpha: 0.8 });
 
-            // 遺跡アイコン
             const ruinText = new Text({
                 text: ruinVisual.icon,
                 style: { fontSize: 18 },
@@ -280,17 +301,15 @@ export function updateMapView(
             ruinText.anchor.set(0.5);
             ruinText.x = cx;
             ruinText.y = cy;
-            _tileContainer.addChild(ruinText);
+            container.addChild(ruinText);
         } else {
-            // 通常マス
-            let color = 0xcccccc;
+            let color = 0x4a4838;
             if (t) {
-                if (t.owner_id === "player") color = 0xccccff;
-                else if (t.owner_id && t.owner_id !== "barbarian") color = 0xffcccc;
+                if (t.owner_id === "player") color = 0x2a3a5a;
+                else if (t.owner_id && t.owner_id !== "barbarian") color = 0x5a2a30;
                 else color = terrainColor(level);
             }
 
-            // 本拠地は城イラスト、それ以外は地形イラスト
             const tex = id === HOME_TERRITORY_ID ? CASTLE_TEXTURE : TERRAIN_TEXTURES[level];
 
             if (tex) {
@@ -299,39 +318,89 @@ export function updateMapView(
                 g.poly(points, true).fill(color);
             }
 
-            // 枠線（本拠地＝黄、自領＝青、他勢力＝赤、中立＝グレー）
+            // テクスチャを隠さないよう装飾は枠線のみ（二重線で視認性を確保）
             if (id === HOME_TERRITORY_ID) {
-                g.poly(points, true).stroke({ width: 2, color: 0xffff00 });
+                g.poly(points, true).stroke({ width: 4, color: 0x1a0f00, alpha: 0.94 });
+                g.poly(points, true).stroke({ width: 2.5, color: 0xffe8a8, alpha: 1 });
             } else if (t?.owner_id === "player") {
-                g.poly(points, true).stroke({ width: 2, color: 0x4488ff });
+                g.poly(points, true).stroke({ width: 4, color: 0x020810, alpha: 0.94 });
+                g.poly(points, true).stroke({ width: 2.5, color: 0x9ae8ff, alpha: 1 });
+                if (t.is_base) {
+                    g.poly(points, true).stroke({ width: 1.5, color: 0xffcc66, alpha: 0.95 });
+                }
             } else if (t?.owner_id && t.owner_id !== "barbarian") {
-                g.poly(points, true).stroke({ width: 2, color: 0xff4488 });
+                g.poly(points, true).stroke({ width: 3.5, color: 0x200508, alpha: 0.92 });
+                g.poly(points, true).stroke({ width: 2, color: 0xff9aaa, alpha: 0.98 });
             } else {
-                g.poly(points, true).stroke({ width: 1, color: 0x888888, alpha: 0.3 });
+                g.poly(points, true).stroke({ width: 1, color: 0x2a2418, alpha: 0.55 });
             }
         }
+    }
+}
 
-        // 行軍先: 旗＋到達までの時間だけで十分（オーバーレイなし）
-        const travel = travelingDestinations?.find(d => d.targetId === id);
-        if (travel) {
-            // 旗（やや大きめで目立たせる）
-            const poleH = 14;
-            g.moveTo(cx, cy).lineTo(cx, cy - poleH).stroke({ width: 2.5, color: 0x5d4037 });
-            g.moveTo(cx, cy - poleH).lineTo(cx + 9, cy - poleH - 4).lineTo(cx, cy - poleH + 3).closePath().fill(0xff4444).stroke({ width: 1, color: 0xcc2222 });
-            // 到達までの時間（ぎりぎり背景付き）
-            const timeStr = formatTimeHHMMSS(travel.secLeft);
-            const timeText = new Text({
-                text: timeStr,
-                style: { fontSize: 11, fill: 0xffffff, fontWeight: "bold" },
-            });
-            timeText.anchor.set(0.5);
-            timeText.x = cx;
-            timeText.y = cy + 6;
-            const pad = 2;
+const _travelPool: { bg: Graphics; text: Text }[] = [];
+let _travelContainer: Container | null = null;
+
+function redrawOverlay(
+    travelingDestinations?: { targetId: string; secLeft: number; unitNames: string[] }[]
+) {
+    if (!_tileContainer) return;
+
+    if (!_travelContainer) {
+        _travelContainer = new Container();
+        _tileContainer.addChild(_travelContainer);
+    }
+
+    const travelMap = new Map<string, { secLeft: number; unitNames: string[] }>();
+    if (travelingDestinations) {
+        for (const d of travelingDestinations) travelMap.set(d.targetId, d);
+    }
+
+    let poolIdx = 0;
+
+    for (const [_id, travel] of travelMap) {
+        const parsed = tryParseTerritoryId(_id);
+        if (!parsed) continue;
+        const { col, row } = parsed;
+
+        const { x: cx, y: cy } = coordToScreen(col, row, TILE_DIMENSIONS);
+
+        let entry = _travelPool[poolIdx];
+        if (!entry) {
             const bg = new Graphics();
-            bg.roundRect(cx - timeText.width / 2 - pad, cy + 6 - timeText.height / 2 - pad, timeText.width + pad * 2, timeText.height + pad * 2, 2).fill(0x000000, 0.65);
-            _tileContainer.addChild(bg);
-            _tileContainer.addChild(timeText);
+            const text = new Text({ text: "", style: { fontSize: 11, fill: 0xffffff, fontWeight: "bold" } });
+            text.anchor.set(0.5);
+            entry = { bg, text };
+            _travelPool.push(entry);
+            _travelContainer.addChild(bg);
+            _travelContainer.addChild(text);
         }
+
+        const timeStr = formatTimeHHMMSS(travel.secLeft);
+        entry.text.text = timeStr;
+        entry.text.x = cx;
+        entry.text.y = cy + 6;
+
+        entry.bg.clear();
+        const poleH = 14;
+        entry.bg.moveTo(cx, cy).lineTo(cx, cy - poleH).stroke({ width: 2.5, color: 0x5d4037 });
+        entry.bg.moveTo(cx, cy - poleH).lineTo(cx + 9, cy - poleH - 4).lineTo(cx, cy - poleH + 3).closePath().fill(0xff4444).stroke({ width: 1, color: 0xcc2222 });
+
+        const pad = 2;
+        entry.bg.roundRect(
+            cx - entry.text.width / 2 - pad,
+            cy + 6 - entry.text.height / 2 - pad,
+            entry.text.width + pad * 2,
+            entry.text.height + pad * 2, 2
+        ).fill({ color: 0x000000, alpha: 0.65 });
+
+        entry.bg.visible = true;
+        entry.text.visible = true;
+        poolIdx++;
+    }
+
+    for (let i = poolIdx; i < _travelPool.length; i++) {
+        _travelPool[i].bg.visible = false;
+        _travelPool[i].text.visible = false;
     }
 }

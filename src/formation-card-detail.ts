@@ -21,9 +21,9 @@ export function buildFormationCardDetailHtml(charIndex: number): string {
       <div class="formation-card-detail-name">${escapeHtml(getBodyDisplayName(charIndex))}</div>
     </div>
     <div class="formation-card-detail-stats">
-      <div>エナジー: ${stats.energy}</div>
-      <div>SPEED: ${stats.speed}</div>
-      <div>攻撃: ${stats.attack} / 魔力: ${stats.magic}</div>
+      <div>魔獣数: ${stats.monster_count}</div>
+      <div>SPEED: ${stats.speed} / 射程: ${stats.range}</div>
+      <div>攻撃: ${stats.attack} / 知力: ${stats.intelligence}</div>
       <div>防御: ${stats.defense} / 魔防: ${stats.magicDefense}</div>
     </div>
     <div class="formation-card-detail-skills">

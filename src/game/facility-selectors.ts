@@ -1,4 +1,6 @@
 import {
+  DEFAULT_PLAYER_ID,
+  getPlayerData,
   getPlayerFacilities,
   getPlayerInventory,
   type BuiltFacility,
@@ -31,16 +33,25 @@ export function getFacilityBonusesForState(
   return calculateFacilityBonuses(getCompletedFacilitiesMap(getPlayerFacilities(state), now));
 }
 
-export function getHomeGridSize(state: GameState, now: number = Date.now()): number {
-  return getFacilityBonusesForState(state, now).homeSize;
+export function getHomeGridSize(_state: GameState, _now: number = Date.now()): number {
+  return 7;
 }
 
-export function getExpansionLevel(state: GameState, now: number = Date.now()): number {
-  return getFacilityBonusesForState(state, now).expansionLevel;
+export function getExpansionLevel(_state: GameState, _now: number = Date.now()): number {
+  return 0;
 }
 
 export function getUnitCapacity(state: GameState, now: number = Date.now()): number {
   return getFacilityBonusesForState(state, now).unitCapacity;
+}
+
+/** プレイヤー基礎＋施設ボーナス（サーバー `model_actions` の cost_cap と一致） */
+const DEFAULT_UNIT_COST_CAP = 4;
+
+export function getEffectiveUnitCostCap(state: GameState, now: number = Date.now()): number {
+  const p = getPlayerData(state, DEFAULT_PLAYER_ID);
+  const base = p?.unit_cost_cap ?? state.unit_cost_cap ?? DEFAULT_UNIT_COST_CAP;
+  return base + getFacilityBonusesForState(state, now).unitCostCapBonus;
 }
 
 export function getInventoryForState(state: GameState): InventoryItem[] {

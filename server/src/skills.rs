@@ -4,6 +4,7 @@
 //! - アクティブスキル: 攻撃時に発動。全キャラが持つ
 //! - ユニークスキル: 特別キャラ専用。発動タイミングはスキル自体に定義
 
+use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -45,9 +46,12 @@ pub enum SkillTarget {
 #[serde(rename_all = "snake_case")]
 pub enum SkillEffectType {
     // ステータス変更系
-    EnergyMultiply,
-    EnergyAdd,
-    EnergySet,
+    #[serde(alias = "energy_multiply")]
+    MonsterCountMultiply,
+    #[serde(alias = "energy_add")]
+    MonsterCountAdd,
+    #[serde(alias = "energy_set")]
+    MonsterCountSet,
     SpeedMultiply,
     SpeedAdd,
     DamageMultiply,
@@ -76,6 +80,10 @@ pub enum SkillEffectType {
     Stun,
     Silence,
     Blind,
+    /// 混乱: value=味方（自陣）を殴る確率 0.0-1.0
+    Confuse,
+    /// 魅了: 行動が常に相手有利（自陣を攻撃）
+    Charm,
     Weaken,
     Vulnerable,
     // バフ・デバフ系
@@ -94,7 +102,8 @@ pub enum SkillEffectType {
     CopyBuff,
     TransferDebuff,
     CooldownReduce,
-    EnergySteal,
+    #[serde(alias = "energy_steal")]
+    MonsterCountSteal,
     Summon,
 }
 
@@ -146,12 +155,76 @@ fn default_probability() -> u8 {
     100
 }
 
-/// クライアントから送信されるスキルデータ
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+fn default_skill_level() -> u8 {
+    1
+}
+
+fn default_slot_levels() -> [u8; 3] {
+    [1, 1, 1]
+}
+
+/// クライアントから送信されるスキルデータ（Skill1=固有アクティブ、Skill2/3=合成追加）
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillData {
     pub passive_id: Option<String>,
     pub active_id: String,
     pub unique_id: Option<String>,
+    /// 後方互換: スロット1のLvとしても扱う
+    #[serde(default = "default_skill_level")]
+    pub skill_level: u8,
+    #[serde(default)]
+    pub skill2_id: Option<String>,
+    #[serde(default)]
+    pub skill3_id: Option<String>,
+    /// 各スロットのスキルLv（1-10）
+    #[serde(default = "default_slot_levels")]
+    pub slot_levels: [u8; 3],
+}
+
+impl Default for SkillData {
+    fn default() -> Self {
+        Self {
+            passive_id: None,
+            active_id: String::new(),
+            unique_id: None,
+            skill_level: 1,
+            skill2_id: None,
+            skill3_id: None,
+            slot_levels: [1, 1, 1],
+        }
+    }
+}
+
+/// スロット index (0..3) の実効スキルLv
+pub fn skill_slot_level(skills: &SkillData, slot: usize) -> u8 {
+    let from_arr = skills
+        .slot_levels
+        .get(slot)
+        .copied()
+        .unwrap_or(1)
+        .clamp(1, 10);
+    if slot == 0 {
+        if from_arr == 1 && skills.skill_level > 1 {
+            skills.skill_level.clamp(1, 10)
+        } else {
+            from_arr
+        }
+    } else {
+        from_arr
+    }
+}
+
+/// スキルレベルによる効果倍率 (Lv1=1.0, Lv10=1.9)
+pub fn skill_level_multiplier(level: u8) -> f32 {
+    1.0 + 0.1 * (level.clamp(1, 10) - 1) as f32
+}
+
+/// スキルレベルによる発動確率補正 (レベルが上がるほど発動率が上がる)
+pub fn adjusted_probability(base_prob: u8, level: u8) -> u8 {
+    let level = level.clamp(1, 10) as u16;
+    let base = base_prob as u16;
+    let bonus = ((100 - base) * (level - 1)) / 18;
+    (base + bonus).min(100) as u8
 }
 
 /// 状態異常・バフの種類
@@ -164,6 +237,10 @@ pub enum StatusEffect {
     Stun { turns: u8 },
     Silence { turns: u8 },
     Blind { miss_rate: f32, turns: u8 },
+    /// 毎攻撃前に value 確率で味方を対象にする
+    Confused { hit_own_team_chance: f32, turns: u8 },
+    /// 常に味方を攻撃対象とみなす
+    Charmed { turns: u8 },
     Weaken { reduction: f32, turns: u8 },
     Vulnerable { increase: f32, turns: u8 },
     Mark { bonus_damage: f32, turns: u8 },
@@ -180,19 +257,27 @@ pub enum StatusEffect {
     Stealth { turns: u8 },
 }
 
+/// 部隊配置（KC準拠: Front=前衛, Back=中衛, Leader=指揮官）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Position {
+    Front,
+    Back,
+    Leader,
+}
+
 /// 戦闘中のキャラクター状態（スキル適用後の修正値を含む）
 #[derive(Debug, Clone)]
 pub struct CombatCharacter {
     pub index: usize,
     pub name: String,
-    pub base_energy: u32,
-    pub current_energy: f32,
+    pub base_monster_count: u32,
+    pub current_monster_count: f32,
     pub base_speed: u32,
     pub current_speed: f32,
     /// 攻撃力（物理ダメージ）
     pub attack: u32,
-    /// 魔力（魔法ダメージ）
-    pub magic: u32,
+    /// 知力（スキル効果に影響）
+    pub intelligence: u32,
     /// 防御力（物理防御）
     pub defense: u32,
     /// 魔法防御力
@@ -205,19 +290,27 @@ pub struct CombatCharacter {
     pub is_first_attack: bool,
     pub status_effects: Vec<StatusEffect>,
     pub has_revived: bool,
+    /// 配置 (Front=前衛, Back=中衛, Leader=指揮官)
+    pub position: Position,
+    /// 射程 (1=近接, 2=中距離, 3=遠距離)
+    pub range: u8,
+    /// 種族（KC7種族）
+    pub race: Option<crate::cards::Race>,
+    /// 占拠力（勝利時の耐久削りに使用）
+    pub occupation_power: u32,
 }
 
 impl CombatCharacter {
-    pub fn new(index: usize, name: String, energy: u32, speed: u32, skills: SkillData) -> Self {
+    pub fn new(index: usize, name: String, monster_count: u32, speed: u32, skills: SkillData) -> Self {
         Self {
             index,
             name,
-            base_energy: energy,
-            current_energy: energy as f32,
+            base_monster_count: monster_count,
+            current_monster_count: monster_count as f32,
             base_speed: speed,
             current_speed: speed as f32,
             attack: 5,
-            magic: 5,
+            intelligence: 5,
             defense: 3,
             magic_defense: 3,
             skills,
@@ -228,6 +321,10 @@ impl CombatCharacter {
             is_first_attack: true,
             status_effects: Vec::new(),
             has_revived: false,
+            position: Position::Front,
+            range: 1,
+            race: None,
+            occupation_power: 0,
         }
     }
 
@@ -235,10 +332,10 @@ impl CombatCharacter {
     pub fn with_stats(
         index: usize,
         name: String,
-        energy: u32,
+        monster_count: u32,
         speed: u32,
         attack: u32,
-        magic: u32,
+        intelligence: u32,
         defense: u32,
         magic_defense: u32,
         skills: SkillData,
@@ -246,12 +343,12 @@ impl CombatCharacter {
         Self {
             index,
             name,
-            base_energy: energy,
-            current_energy: energy as f32,
+            base_monster_count: monster_count,
+            current_monster_count: monster_count as f32,
             base_speed: speed,
             current_speed: speed as f32,
             attack,
-            magic,
+            intelligence,
             defense,
             magic_defense,
             skills,
@@ -262,6 +359,10 @@ impl CombatCharacter {
             is_first_attack: true,
             status_effects: Vec::new(),
             has_revived: false,
+            position: Position::Front,
+            range: 1,
+            race: None,
+            occupation_power: 0,
         }
     }
 
@@ -270,18 +371,18 @@ impl CombatCharacter {
         self.attack as f32 * self.damage_multiplier
     }
 
-    /// 魔法ダメージを計算
-    pub fn magic_damage(&self) -> f32 {
-        self.magic as f32 * self.damage_multiplier
+    /// 知力ベースのダメージを計算
+    pub fn intelligence_damage(&self) -> f32 {
+        self.intelligence as f32 * self.damage_multiplier
     }
 
-    /// 合計攻撃力（物理+魔法、簡易計算）
+    /// 合計攻撃力（物理+知力）
     pub fn total_attack_power(&self) -> f32 {
-        (self.attack as f32 + self.magic as f32) * self.damage_multiplier
+        (self.attack as f32 + self.intelligence as f32) * self.damage_multiplier
     }
 
-    pub fn effective_energy(&self) -> u32 {
-        (self.current_energy.max(0.0).round()) as u32
+    pub fn effective_monster_count(&self) -> u32 {
+        (self.current_monster_count.max(0.0).round()) as u32
     }
 
     /// シールド量を取得
@@ -325,6 +426,25 @@ impl CombatCharacter {
         self.status_effects.iter().any(|e| matches!(e, StatusEffect::Taunt { .. }))
     }
 
+    pub fn is_charmed(&self) -> bool {
+        self.status_effects.iter().any(|e| matches!(e, StatusEffect::Charmed { .. }))
+    }
+
+    /// 混乱による「自陣を狙う」追加確率（0〜1、魅了は含めない）
+    pub fn confused_own_team_chance(&self) -> f32 {
+        self.status_effects
+            .iter()
+            .filter_map(|e| {
+                if let StatusEffect::Confused { hit_own_team_chance, .. } = e {
+                    Some(*hit_own_team_chance)
+                } else {
+                    None
+                }
+            })
+            .sum::<f32>()
+            .min(1.0)
+    }
+
     /// 被ダメージ増加率を取得
     pub fn get_vulnerability(&self) -> f32 {
         self.status_effects.iter().filter_map(|e| {
@@ -353,6 +473,64 @@ impl CombatCharacter {
         }).sum()
     }
 
+    /// 行動順用の実効素早さ（速度バフを反映）
+    pub fn turn_order_speed(&self) -> f32 {
+        let buff: f32 = self.status_effects.iter().filter_map(|e| {
+            if let StatusEffect::SpeedBuff { bonus, .. } = e {
+                Some(*bonus)
+            } else {
+                None
+            }
+        }).sum();
+        self.current_speed * (1.0 + buff)
+    }
+
+    /// 攻撃バフによる攻撃側倍率（1.0基準）
+    pub fn attack_buff_multiplier(&self) -> f32 {
+        1.0 + self
+            .status_effects
+            .iter()
+            .filter_map(|e| {
+                if let StatusEffect::AttackBuff { bonus, .. } = e {
+                    Some(*bonus)
+                } else {
+                    None
+                }
+            })
+            .sum::<f32>()
+    }
+
+    /// 防御バフによる防御側倍率（1.0基準）
+    pub fn defense_buff_multiplier(&self) -> f32 {
+        1.0 + self
+            .status_effects
+            .iter()
+            .filter_map(|e| {
+                if let StatusEffect::DefenseBuff { bonus, .. } = e {
+                    Some(*bonus)
+                } else {
+                    None
+                }
+            })
+            .sum::<f32>()
+    }
+
+    /// 弱体化による与ダメージ倍率（1.0基準）
+    pub fn outgoing_damage_multiplier(&self) -> f32 {
+        let weaken: f32 = self
+            .status_effects
+            .iter()
+            .filter_map(|e| {
+                if let StatusEffect::Weaken { reduction, .. } = e {
+                    Some(*reduction)
+                } else {
+                    None
+                }
+            })
+            .sum();
+        (1.0 - weaken.min(0.95)).max(0.05)
+    }
+
     /// ターン経過処理（毒・炎上ダメージ、持続ターン減少）
     pub fn process_turn_effects(&mut self, log: &mut Vec<String>) {
         let mut damage_taken = 0.0;
@@ -372,8 +550,8 @@ impl CombatCharacter {
         }
 
         if damage_taken > 0.0 {
-            self.current_energy -= damage_taken;
-            if self.current_energy <= 0.0 {
+            self.current_monster_count -= damage_taken;
+            if self.current_monster_count <= 0.0 {
                 self.is_alive = false;
                 log.push(format!("  {}が状態異常で倒れた！", self.name));
             }
@@ -388,6 +566,8 @@ impl CombatCharacter {
                 StatusEffect::Stun { turns } |
                 StatusEffect::Silence { turns } |
                 StatusEffect::Blind { turns, .. } |
+                StatusEffect::Confused { turns, .. } |
+                StatusEffect::Charmed { turns } |
                 StatusEffect::Weaken { turns, .. } |
                 StatusEffect::Vulnerable { turns, .. } |
                 StatusEffect::Mark { turns, .. } |
@@ -447,11 +627,11 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "power_aura" => Some(Skill {
             id: "power_aura".to_string(),
             name: "闘気の波動".to_string(),
-            description: "戦闘開始時、味方全員のエナジー1.2倍".to_string(),
+            description: "戦闘開始時、味方全員の魔獣数1.2倍".to_string(),
             category: SkillCategory::Passive,
             timing: SkillTiming::BattleStart,
             effects: vec![SkillEffect {
-                effect_type: SkillEffectType::EnergyMultiply,
+                effect_type: SkillEffectType::MonsterCountMultiply,
                 target: SkillTarget::AllyUnit,
                 value: 1.2,
                 duration: None,
@@ -475,11 +655,11 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "life_blessing" => Some(Skill {
             id: "life_blessing".to_string(),
             name: "生命の恵み".to_string(),
-            description: "戦闘開始時、味方全員のエナジー+3".to_string(),
+            description: "戦闘開始時、味方全員の魔獣数+3".to_string(),
             category: SkillCategory::Passive,
             timing: SkillTiming::BattleStart,
             effects: vec![SkillEffect {
-                effect_type: SkillEffectType::EnergyAdd,
+                effect_type: SkillEffectType::MonsterCountAdd,
                 target: SkillTarget::AllyUnit,
                 value: 3.0,
                 duration: None,
@@ -683,7 +863,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
             category: SkillCategory::Passive,
             timing: SkillTiming::OnDeath,
             effects: vec![SkillEffect {
-                effect_type: SkillEffectType::EnergySet,
+                effect_type: SkillEffectType::MonsterCountSet,
                 target: SkillTarget::SelfOnly,
                 value: 1.0,
                 duration: None,
@@ -835,14 +1015,14 @@ pub fn get_skill(id: &str) -> Option<Skill> {
             }],
             probability: 100,
         }),
-        "energy_steal" => Some(Skill {
-            id: "energy_steal".to_string(),
+        "monster_steal" => Some(Skill {
+            id: "monster_steal".to_string(),
             name: "奪命の一撃".to_string(),
-            description: "攻撃時、敵から3エナジーを奪う".to_string(),
+            description: "攻撃時、敵から3魔獣数を奪う".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
-                effect_type: SkillEffectType::EnergySteal,
+                effect_type: SkillEffectType::MonsterCountSteal,
                 target: SkillTarget::EnemySingle,
                 value: 3.0,
                 duration: None,
@@ -1113,7 +1293,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "fake_death" => Some(Skill {
             id: "fake_death".to_string(),
             name: "偽りの死".to_string(),
-            description: "死亡時、50%でエナジー半分で復活".to_string(),
+            description: "死亡時、50%で魔獣数半分で復活".to_string(),
             category: SkillCategory::Unique,
             timing: SkillTiming::OnDeath,
             effects: vec![SkillEffect {
@@ -1127,7 +1307,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "phoenix_rebirth" => Some(Skill {
             id: "phoenix_rebirth".to_string(),
             name: "不死鳥の転生".to_string(),
-            description: "死亡時、100%でエナジー全快で復活（1回のみ）".to_string(),
+            description: "死亡時、100%で魔獣数全快で復活（1回のみ）".to_string(),
             category: SkillCategory::Unique,
             timing: SkillTiming::OnDeath,
             effects: vec![SkillEffect {
@@ -1142,11 +1322,11 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "beauty_charm" => Some(Skill {
             id: "beauty_charm".to_string(),
             name: "美神の輝き".to_string(),
-            description: "戦闘開始時、味方全員のエナジー1.5倍".to_string(),
+            description: "戦闘開始時、味方全員の魔獣数1.5倍".to_string(),
             category: SkillCategory::Unique,
             timing: SkillTiming::BattleStart,
             effects: vec![SkillEffect {
-                effect_type: SkillEffectType::EnergyMultiply,
+                effect_type: SkillEffectType::MonsterCountMultiply,
                 target: SkillTarget::AllyUnit,
                 value: 1.5,
                 duration: None,
@@ -1185,11 +1365,11 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "soul_reap" => Some(Skill {
             id: "soul_reap".to_string(),
             name: "魂狩り".to_string(),
-            description: "敵を倒した時、その敵のエナジーの50%を獲得".to_string(),
+            description: "敵を倒した時、その敵の魔獣数の50%を獲得".to_string(),
             category: SkillCategory::Unique,
             timing: SkillTiming::OnKill,
             effects: vec![SkillEffect {
-                effect_type: SkillEffectType::EnergySteal,
+                effect_type: SkillEffectType::MonsterCountSteal,
                 target: SkillTarget::EnemySingle,
                 value: 0.5,
                 duration: None,
@@ -1279,7 +1459,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "sacrifice" => Some(Skill {
             id: "sacrifice".to_string(),
             name: "生贄の儀".to_string(),
-            description: "自分のHP半分を消費し、味方全員のエナジー2倍".to_string(),
+            description: "自分のHP半分を消費し、味方全員の魔獣数2倍".to_string(),
             category: SkillCategory::Unique,
             timing: SkillTiming::BattleStart,
             effects: vec![
@@ -1290,7 +1470,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
                     duration: None,
                 },
                 SkillEffect {
-                    effect_type: SkillEffectType::EnergyMultiply,
+                    effect_type: SkillEffectType::MonsterCountMultiply,
                     target: SkillTarget::AllyUnit,
                     value: 2.0,
                     duration: None,
@@ -1312,10 +1492,34 @@ pub fn should_trigger_skill(probability: u8) -> bool {
     rng.gen_range(0..100) < probability
 }
 
-fn get_triggered_skill(skill_id: &str, timing: SkillTiming) -> Option<Skill> {
+fn get_triggered_skill(skill_id: &str, timing: SkillTiming, level: u8) -> Option<Skill> {
     let skill = get_skill(skill_id)?;
-    if skill.timing == timing && should_trigger_skill(skill.probability) {
-        Some(skill)
+    let prob = adjusted_probability(skill.probability, level);
+    if skill.timing == timing && should_trigger_skill(prob) {
+        let multiplier = skill_level_multiplier(level);
+        let mut scaled = skill;
+        for effect in scaled.effects.iter_mut() {
+            effect.value *= multiplier;
+        }
+        Some(scaled)
+    } else {
+        None
+    }
+}
+
+fn get_triggered_active_skill(skill_id: &str, timing: SkillTiming, level: u8) -> Option<Skill> {
+    let skill = get_skill(skill_id)?;
+    if skill.category != SkillCategory::Active {
+        return None;
+    }
+    let prob = adjusted_probability(skill.probability, level);
+    if skill.timing == timing && should_trigger_skill(prob) {
+        let multiplier = skill_level_multiplier(level);
+        let mut scaled = skill;
+        for effect in scaled.effects.iter_mut() {
+            effect.value *= multiplier;
+        }
+        Some(scaled)
     } else {
         None
     }
@@ -1339,54 +1543,102 @@ fn log_skill_trigger(
     }
 }
 
-/// 戦闘開始時のパッシブスキル適用
+/// KC準拠スタートアップフェーズ: 味方+敵を素早さ昇順で並べ、各自のスキルを自陣側に適用
 pub fn apply_battle_start_skills(
-    characters: &mut [CombatCharacter],
+    allies: &mut [CombatCharacter],
+    enemies: &mut [CombatCharacter],
     log: &mut Vec<String>,
 ) {
-    let skill_ids: Vec<(usize, Option<String>, Option<String>)> = characters
-        .iter()
-        .map(|c| (c.index, c.skills.passive_id.clone(), c.skills.unique_id.clone()))
-        .collect();
+    let mut startup_order: Vec<(usize, bool, f32, Option<String>, Option<String>, u8)> = Vec::new();
+    for c in allies.iter() {
+        if c.is_alive {
+            startup_order.push((
+                c.index,
+                true,
+                c.turn_order_speed(),
+                c.skills.passive_id.clone(),
+                c.skills.unique_id.clone(),
+                skill_slot_level(&c.skills, 0),
+            ));
+        }
+    }
+    for c in enemies.iter() {
+        if c.is_alive {
+            startup_order.push((
+                c.index,
+                false,
+                c.turn_order_speed(),
+                c.skills.passive_id.clone(),
+                c.skills.unique_id.clone(),
+                skill_slot_level(&c.skills, 0),
+            ));
+        }
+    }
+    startup_order.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
-    for (char_idx, passive_id, unique_id) in skill_ids {
+    for (char_idx, is_ally, _, passive_id, unique_id, level) in startup_order {
         if let Some(id) = passive_id {
-            if let Some(skill) = get_triggered_skill(&id, SkillTiming::BattleStart) {
-                let char_name = characters.iter().find(|c| c.index == char_idx).map(|c| c.name.clone()).unwrap_or_default();
+            if let Some(skill) = get_triggered_skill(&id, SkillTiming::BattleStart, level) {
+                let char_name = allies
+                    .iter()
+                    .chain(enemies.iter())
+                    .find(|c| c.index == char_idx)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
                 log_skill_trigger(log, "◆", &char_name, &skill.name, false, &skill.description);
-                apply_skill_effects(&skill, char_idx, characters, log);
+                apply_skill_effects(&skill, char_idx, allies, enemies, is_ally, log);
             }
         }
-
         if let Some(id) = unique_id {
-            if let Some(skill) = get_triggered_skill(&id, SkillTiming::BattleStart) {
-                let char_name = characters.iter().find(|c| c.index == char_idx).map(|c| c.name.clone()).unwrap_or_default();
+            if let Some(skill) = get_triggered_skill(&id, SkillTiming::BattleStart, level) {
+                let char_name = allies
+                    .iter()
+                    .chain(enemies.iter())
+                    .find(|c| c.index == char_idx)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
                 log_skill_trigger(log, "◆◆", &char_name, &skill.name, true, &skill.description);
-                apply_skill_effects(&skill, char_idx, characters, log);
+                apply_skill_effects(&skill, char_idx, allies, enemies, is_ally, log);
             }
         }
     }
 }
 
-/// 攻撃時のスキル適用（アクティブ・ユニーク）
+/// 攻撃時のスキル適用（アクティブは Skill1→Skill2→Skill3 の順に1つだけ発動、続けて固有ユニーク）
 pub fn apply_attack_skills(
     attacker: &mut CombatCharacter,
     log: &mut Vec<String>,
 ) -> AttackModifiers {
     let mut modifiers = AttackModifiers::default();
 
-    if let Some(skill) = get_triggered_skill(&attacker.skills.active_id, SkillTiming::OnAttack) {
-        log_skill_trigger(log, "★", &attacker.name, &skill.name, false, &skill.description);
-        for effect in &skill.effects {
-            apply_attack_effect(effect, attacker, &mut modifiers, log);
+    let slot_ids: [Option<&str>; 3] = [
+        Some(attacker.skills.active_id.as_str()).filter(|s| !s.is_empty()),
+        attacker.skills.skill2_id.as_deref(),
+        attacker.skills.skill3_id.as_deref(),
+    ];
+
+    for (slot_i, id_opt) in slot_ids.into_iter().enumerate() {
+        let Some(id) = id_opt else { continue };
+        let level = skill_slot_level(&attacker.skills, slot_i);
+        if let Some(skill) = get_triggered_active_skill(id, SkillTiming::OnAttack, level) {
+            modifiers.skill_activated = true;
+            log_skill_trigger(log, "★", &attacker.name, &skill.name, false, &skill.description);
+            for effect in &skill.effects {
+                apply_attack_effect(effect, attacker, &mut modifiers, log);
+            }
+            return modifiers;
         }
     }
 
     if let Some(ref unique_id) = attacker.skills.unique_id {
-        if let Some(skill) = get_triggered_skill(unique_id, SkillTiming::OnAttack) {
-            log_skill_trigger(log, "★★", &attacker.name, &skill.name, true, &skill.description);
-            for effect in &skill.effects {
-                apply_attack_effect(effect, attacker, &mut modifiers, log);
+        let level = skill_slot_level(&attacker.skills, 0);
+        if let Some(skill) = get_triggered_skill(unique_id, SkillTiming::OnAttack, level) {
+            if skill.category == SkillCategory::Unique {
+                modifiers.skill_activated = true;
+                log_skill_trigger(log, "★★", &attacker.name, &skill.name, true, &skill.description);
+                for effect in &skill.effects {
+                    apply_attack_effect(effect, attacker, &mut modifiers, log);
+                }
             }
         }
     }
@@ -1397,6 +1649,7 @@ pub fn apply_attack_skills(
 /// 攻撃時の修正値
 #[derive(Debug, Clone, Default)]
 pub struct AttackModifiers {
+    pub skill_activated: bool,
     pub damage_multiplier: f32,
     pub damage_add: f32,
     pub extra_attacks: u32,
@@ -1406,7 +1659,7 @@ pub struct AttackModifiers {
     pub true_damage: f32,
     pub percent_damage: f32,
     pub execute_threshold: f32,
-    pub energy_steal: f32,
+    pub monster_steal: f32,
     pub status_effects: Vec<SkillEffect>,
     pub self_effects: Vec<SkillEffect>,
     pub ally_effects: Vec<SkillEffect>,
@@ -1416,6 +1669,7 @@ pub struct AttackModifiers {
 impl AttackModifiers {
     pub fn new() -> Self {
         Self {
+            skill_activated: false,
             damage_multiplier: 1.0,
             damage_add: 0.0,
             extra_attacks: 0,
@@ -1425,7 +1679,7 @@ impl AttackModifiers {
             true_damage: 0.0,
             percent_damage: 0.0,
             execute_threshold: 0.0,
-            energy_steal: 0.0,
+            monster_steal: 0.0,
             status_effects: Vec::new(),
             self_effects: Vec::new(),
             ally_effects: Vec::new(),
@@ -1434,25 +1688,89 @@ impl AttackModifiers {
     }
 }
 
-fn apply_skill_effects(
+/// スタートアップ等でスキル効果を適用（味方・敵スライスを分けて Enemy* / Ally* を解決）
+pub(crate) fn apply_skill_effects(
     skill: &Skill,
     caster_idx: usize,
-    characters: &mut [CombatCharacter],
+    allies: &mut [CombatCharacter],
+    enemies: &mut [CombatCharacter],
+    caster_on_allies: bool,
     log: &mut Vec<String>,
 ) {
+    let (friend, foe): (&mut [CombatCharacter], &mut [CombatCharacter]) = if caster_on_allies {
+        (allies, enemies)
+    } else {
+        (enemies, allies)
+    };
+
     for effect in &skill.effects {
         match effect.target {
             SkillTarget::SelfOnly => {
-                if let Some(c) = characters.iter_mut().find(|c| c.index == caster_idx) {
+                if let Some(c) = friend.iter_mut().find(|c| c.index == caster_idx) {
                     apply_effect_to_character(effect, c, log);
                 }
             }
             SkillTarget::AllyUnit => {
-                for c in characters.iter_mut() {
+                for c in friend.iter_mut() {
+                    if c.is_alive {
+                        apply_effect_to_character(effect, c, log);
+                    }
+                }
+            }
+            SkillTarget::AllySingle => {
+                let alive: Vec<usize> = friend
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.is_alive)
+                    .map(|(i, _)| i)
+                    .collect();
+                if let Some(&idx) = alive.choose(&mut rand::thread_rng()) {
+                    apply_effect_to_character(effect, &mut friend[idx], log);
+                }
+            }
+            SkillTarget::AllyLowestHp => {
+                if let Some(c) = friend.iter_mut().filter(|c| c.is_alive).min_by(|a, b| {
+                    a.current_monster_count
+                        .partial_cmp(&b.current_monster_count)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                }) {
                     apply_effect_to_character(effect, c, log);
                 }
             }
-            _ => {}
+            SkillTarget::EnemySingle | SkillTarget::EnemyRandom => {
+                let alive: Vec<usize> = foe
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.is_alive)
+                    .map(|(i, _)| i)
+                    .collect();
+                if let Some(&idx) = alive.choose(&mut rand::thread_rng()) {
+                    apply_effect_to_character(effect, &mut foe[idx], log);
+                }
+            }
+            SkillTarget::EnemyHighestHp => {
+                if let Some(c) = foe.iter_mut().filter(|c| c.is_alive).max_by(|a, b| {
+                    a.current_monster_count
+                        .partial_cmp(&b.current_monster_count)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                }) {
+                    apply_effect_to_character(effect, c, log);
+                }
+            }
+            SkillTarget::EnemyAll => {
+                for c in foe.iter_mut() {
+                    if c.is_alive {
+                        apply_effect_to_character(effect, c, log);
+                    }
+                }
+            }
+            SkillTarget::BothAll => {
+                for c in friend.iter_mut().chain(foe.iter_mut()) {
+                    if c.is_alive {
+                        apply_effect_to_character(effect, c, log);
+                    }
+                }
+            }
         }
     }
 }
@@ -1466,28 +1784,28 @@ pub fn apply_effect_to_character(
     
     match effect.effect_type {
         // ステータス変更系
-        SkillEffectType::EnergyMultiply => {
-            let before = character.current_energy;
-            character.current_energy *= effect.value;
+        SkillEffectType::MonsterCountMultiply => {
+            let before = character.current_monster_count;
+            character.current_monster_count *= effect.value;
             log.push(format!(
-                "  → {}のエナジー: {:.0} → {:.0}",
-                character.name, before, character.current_energy
+                "  → {}の魔獣数: {:.0} → {:.0}",
+                character.name, before, character.current_monster_count
             ));
         }
-        SkillEffectType::EnergyAdd => {
-            let before = character.current_energy;
-            character.current_energy += effect.value;
+        SkillEffectType::MonsterCountAdd => {
+            let before = character.current_monster_count;
+            character.current_monster_count += effect.value;
             log.push(format!(
-                "  → {}のエナジー: {:.0} → {:.0}",
-                character.name, before, character.current_energy
+                "  → {}の魔獣数: {:.0} → {:.0}",
+                character.name, before, character.current_monster_count
             ));
         }
-        SkillEffectType::EnergySet => {
-            let before = character.current_energy;
-            character.current_energy = effect.value;
+        SkillEffectType::MonsterCountSet => {
+            let before = character.current_monster_count;
+            character.current_monster_count = effect.value;
             log.push(format!(
-                "  → {}のエナジー: {:.0} → {:.0}",
-                character.name, before, character.current_energy
+                "  → {}の魔獣数: {:.0} → {:.0}",
+                character.name, before, character.current_monster_count
             ));
         }
         SkillEffectType::SpeedMultiply => {
@@ -1573,6 +1891,21 @@ pub fn apply_effect_to_character(
             character.status_effects.push(StatusEffect::Blind { miss_rate: effect.value, turns });
             log.push(format!("  → {}に暗闘付与（命中率{:.0}%低下）", character.name, effect.value * 100.0));
         }
+        SkillEffectType::Confuse => {
+            let ch = effect.value.clamp(0.0, 1.0);
+            character
+                .status_effects
+                .push(StatusEffect::Confused { hit_own_team_chance: ch, turns });
+            log.push(format!(
+                "  → {}に混乱付与（自陣誤射{:.0}%）",
+                character.name,
+                ch * 100.0
+            ));
+        }
+        SkillEffectType::Charm => {
+            character.status_effects.push(StatusEffect::Charmed { turns });
+            log.push(format!("  → {}に魅了！（{}ターン）", character.name, turns));
+        }
         SkillEffectType::Weaken => {
             character.status_effects.push(StatusEffect::Weaken { reduction: effect.value, turns });
             log.push(format!("  → {}に弱体化付与（ダメージ{:.0}%低下）", character.name, effect.value * 100.0));
@@ -1612,30 +1945,30 @@ pub fn apply_effect_to_character(
             log.push(format!("  → {}に追加攻撃{:.0}回付与", character.name, effect.value));
         }
         SkillEffectType::Heal => {
-            let before = character.current_energy;
-            character.current_energy = (character.current_energy + effect.value).min(character.base_energy as f32);
+            let before = character.current_monster_count;
+            character.current_monster_count = (character.current_monster_count + effect.value).min(character.base_monster_count as f32);
             log.push(format!(
                 "  → {}を{:.0}回復（{:.0} → {:.0}）",
-                character.name, effect.value, before, character.current_energy
+                character.name, effect.value, before, character.current_monster_count
             ));
         }
         SkillEffectType::HealPercent => {
-            let before = character.current_energy;
-            let heal_amount = character.base_energy as f32 * effect.value;
-            character.current_energy = (character.current_energy + heal_amount).min(character.base_energy as f32);
+            let before = character.current_monster_count;
+            let heal_amount = character.base_monster_count as f32 * effect.value;
+            character.current_monster_count = (character.current_monster_count + heal_amount).min(character.base_monster_count as f32);
             log.push(format!(
                 "  → {}を{:.0}%回復（{:.0} → {:.0}）",
-                character.name, effect.value * 100.0, before, character.current_energy
+                character.name, effect.value * 100.0, before, character.current_monster_count
             ));
         }
         SkillEffectType::PercentDamage => {
-            let damage = character.current_energy * effect.value;
-            character.current_energy -= damage;
+            let damage = character.current_monster_count * effect.value;
+            character.current_monster_count -= damage;
             log.push(format!(
                 "  → {}に{:.0}%ダメージ（{:.0}）",
                 character.name, effect.value * 100.0, damage
             ));
-            if character.current_energy <= 0.0 {
+            if character.current_monster_count <= 0.0 {
                 character.is_alive = false;
                 log.push(format!("  → {}が倒れた！", character.name));
             }
@@ -1649,6 +1982,7 @@ pub fn apply_effect_to_character(
                     StatusEffect::Poison { .. } | StatusEffect::Burn { .. } |
                     StatusEffect::Freeze { .. } | StatusEffect::Stun { .. } |
                     StatusEffect::Silence { .. } | StatusEffect::Blind { .. } |
+                    StatusEffect::Confused { .. } | StatusEffect::Charmed { .. } |
                     StatusEffect::Weaken { .. } | StatusEffect::Vulnerable { .. } |
                     StatusEffect::Mark { .. } => {
                         removed += 1;
@@ -1732,14 +2066,15 @@ fn apply_attack_effect(
             modifiers.execute_threshold = modifiers.execute_threshold.max(effect.value);
             log.push(format!("  → HP{:.0}%以下の敵を即死", effect.value * 100.0));
         }
-        SkillEffectType::EnergySteal => {
-            modifiers.energy_steal += effect.value;
-            log.push(format!("  → {:.0}エナジー奪取", effect.value));
+        SkillEffectType::MonsterCountSteal => {
+            modifiers.monster_steal += effect.value;
+            log.push(format!("  → {:.0}魔獣数奪取", effect.value));
         }
         // 状態異常付与系は別途処理
         SkillEffectType::Poison | SkillEffectType::Burn | SkillEffectType::Freeze |
         SkillEffectType::Stun | SkillEffectType::Silence | SkillEffectType::Vulnerable |
-        SkillEffectType::Mark | SkillEffectType::Weaken => {
+        SkillEffectType::Mark | SkillEffectType::Weaken | SkillEffectType::Confuse |
+        SkillEffectType::Charm => {
             modifiers.status_effects.push(effect.clone());
         }
         // バフ系
@@ -1776,16 +2111,17 @@ pub fn check_death_skills(
     log: &mut Vec<String>,
 ) -> bool {
     if let Some(ref unique_id) = character.skills.unique_id {
-        if let Some(skill) = get_triggered_skill(unique_id, SkillTiming::OnDeath) {
+        let level = skill_slot_level(&character.skills, 0);
+        if let Some(skill) = get_triggered_skill(unique_id, SkillTiming::OnDeath, level) {
             for effect in &skill.effects {
                 if effect.effect_type == SkillEffectType::Revive {
-                    character.current_energy = character.base_energy as f32 * effect.value;
+                    character.current_monster_count = character.base_monster_count as f32 * effect.value;
                     character.is_alive = true;
                     log.push(format!(
-                        "{}の「{}」が発動！エナジー{}で復活！",
+                        "{}の「{}」が発動！魔獣数{}で復活！",
                         character.name,
                         skill.name,
-                        character.effective_energy()
+                        character.effective_monster_count()
                     ));
                     if !skill.description.is_empty() {
                         log.push(format!("  → {}", skill.description));

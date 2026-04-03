@@ -16,10 +16,12 @@ pub(crate) fn cleanup_expired_ruins(state: &mut GameState) -> bool {
                 if now_ms >= expires_at {
                     territory.ruin = None;
                     territory.owner_id = None;
-                    let (troops, body_energies, body_names) = generate_neutral_enemies(territory.level);
+                    let (troops, body_monster_counts, body_names) = generate_neutral_enemies(territory.level);
                     territory.troops = troops;
-                    territory.body_energies = Some(body_energies);
+                    territory.body_monster_counts = Some(body_monster_counts);
                     territory.body_names = Some(body_names);
+                    territory.durability = 0;
+                    territory.max_durability = 0;
                     changed = true;
                 }
             }
@@ -49,13 +51,16 @@ pub(crate) fn spawn_random_ruin(state: &mut GameState) -> bool {
         let ruin = generate_ruin(&territory_id);
 
         let troops = ruin.enemies.len() as u32;
-        let body_energies = ruin.enemy_energies.clone();
+        let body_monster_counts = ruin.enemy_monster_counts.clone();
         let body_names = ruin.enemy_names.clone();
 
         state.territories[index].ruin = Some(ruin);
         state.territories[index].troops = troops;
-        state.territories[index].body_energies = Some(body_energies);
+        state.territories[index].body_monster_counts = Some(body_monster_counts);
         state.territories[index].body_names = Some(body_names);
+        // 遺跡は戦闘クリアで即占領（耐久なし）
+        state.territories[index].durability = 0;
+        state.territories[index].max_durability = 0;
 
         true
     } else {

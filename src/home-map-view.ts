@@ -48,7 +48,7 @@ export async function initHomeMapView(
     await app.init({ 
         width: 500, 
         height: 350, 
-        backgroundColor: 0x1a1a2e,
+        backgroundColor: 0x0a0a0f,
         resolution: window.devicePixelRatio || 1,
         autoDensity: true,
     });
@@ -154,21 +154,23 @@ function renderHomeGrid() {
                 const isCenter = realCol === HOME_COL && realRow === HOME_ROW;
                 const isSelected = _selectedTile && _selectedTile.col === realCol && _selectedTile.row === realRow;
 
-                // タイルを描画
-                g.poly(points, true).fill(visual.color);
+                const tileColor = facility || isCenter ? visual.color : 0x1a1810;
+                g.poly(points, true).fill(tileColor);
 
-                // 枠線
+                // タイル下辺に影を入れて立体感を出す
+                const bottomEdge = [points[2], points[3], points[4], points[5], points[6], points[7]];
+                g.poly(bottomEdge, false).stroke({ width: 2, color: 0x000000, alpha: 0.5 });
+
                 if (isSelected) {
-                    g.poly(points, true).stroke({ width: 3, color: 0x00ff00 });
+                    g.poly(points, true).stroke({ width: 2, color: 0xc9a84c });
                 } else if (isCenter) {
-                    g.poly(points, true).stroke({ width: 3, color: 0xffd700 });
+                    g.poly(points, true).stroke({ width: 2, color: 0xc9a84c, alpha: 0.8 });
                 } else if (facility) {
-                    g.poly(points, true).stroke({ width: 2, color: 0xffffff, alpha: 0.5 });
+                    g.poly(points, true).stroke({ width: 1, color: 0xc9a84c, alpha: 0.35 });
                 } else {
-                    g.poly(points, true).stroke({ width: 1, color: 0x888888, alpha: 0.3 });
+                    g.poly(points, true).stroke({ width: 1, color: 0x3a3020, alpha: 0.6 });
                 }
 
-                // 施設アイコン
                 if (facility || isCenter) {
                     const icon = isCenter ? "🏰" : visual.icon;
                     const iconText = new Text({

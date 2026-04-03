@@ -70,7 +70,7 @@ impl RuinEnemyType {
 /// 遺跡敵キャラクター定義
 pub struct RuinEnemyDef {
     pub name: &'static str,
-    pub energy: u32,
+    pub monster_count: u32,
 }
 
 /// 遺跡敵の定義を取得
@@ -78,79 +78,79 @@ pub fn get_ruin_enemy(enemy_type: RuinEnemyType) -> RuinEnemyDef {
     match enemy_type {
         // 基本敵
         RuinEnemyType::Golem => RuinEnemyDef {
-            name: "ゴーレム", energy: 15,
+            name: "ゴーレム", monster_count: 15,
         },
         RuinEnemyType::Phantom => RuinEnemyDef {
-            name: "ファントム", energy: 8,
+            name: "ファントム", monster_count: 8,
         },
         RuinEnemyType::SkeletonKnight => RuinEnemyDef {
-            name: "スケルトンナイト", energy: 10,
+            name: "スケルトンナイト", monster_count: 10,
         },
         RuinEnemyType::TreasureMimic => RuinEnemyDef {
-            name: "トレジャーミミック", energy: 5,
+            name: "トレジャーミミック", monster_count: 5,
         },
         RuinEnemyType::DarkWizard => RuinEnemyDef {
-            name: "ダークウィザード", energy: 12,
+            name: "ダークウィザード", monster_count: 12,
         },
         // 追加敵（低〜中級）
         RuinEnemyType::SlimeKing => RuinEnemyDef {
-            name: "スライムキング", energy: 20,
+            name: "スライムキング", monster_count: 20,
         },
         RuinEnemyType::CursedArmor => RuinEnemyDef {
-            name: "カースドアーマー", energy: 14,
+            name: "カースドアーマー", monster_count: 14,
         },
         RuinEnemyType::ShadowAssassin => RuinEnemyDef {
-            name: "シャドウアサシン", energy: 7,
+            name: "シャドウアサシン", monster_count: 7,
         },
         RuinEnemyType::FlameSpirit => RuinEnemyDef {
-            name: "フレイムスピリット", energy: 9,
+            name: "フレイムスピリット", monster_count: 9,
         },
         RuinEnemyType::IceElemental => RuinEnemyDef {
-            name: "アイスエレメンタル", energy: 11,
+            name: "アイスエレメンタル", monster_count: 11,
         },
         RuinEnemyType::PoisonSpider => RuinEnemyDef {
-            name: "ポイズンスパイダー", energy: 6,
+            name: "ポイズンスパイダー", monster_count: 6,
         },
         RuinEnemyType::StoneGargoyle => RuinEnemyDef {
-            name: "ストーンガーゴイル", energy: 13,
+            name: "ストーンガーゴイル", monster_count: 13,
         },
         // 追加敵（中〜上級）
         RuinEnemyType::DeathKnight => RuinEnemyDef {
-            name: "デスナイト", energy: 18,
+            name: "デスナイト", monster_count: 18,
         },
         RuinEnemyType::Necromancer => RuinEnemyDef {
-            name: "ネクロマンサー", energy: 10,
+            name: "ネクロマンサー", monster_count: 10,
         },
         RuinEnemyType::CrystalGolem => RuinEnemyDef {
-            name: "クリスタルゴーレム", energy: 22,
+            name: "クリスタルゴーレム", monster_count: 22,
         },
         RuinEnemyType::ThunderHawk => RuinEnemyDef {
-            name: "サンダーホーク", energy: 8,
+            name: "サンダーホーク", monster_count: 8,
         },
         RuinEnemyType::EarthWyrm => RuinEnemyDef {
-            name: "アースワーム", energy: 16,
+            name: "アースワーム", monster_count: 16,
         },
         RuinEnemyType::VoidStalker => RuinEnemyDef {
-            name: "ヴォイドストーカー", energy: 12,
+            name: "ヴォイドストーカー", monster_count: 12,
         },
         RuinEnemyType::AncientMummy => RuinEnemyDef {
-            name: "エンシェントマミー", energy: 14,
+            name: "エンシェントマミー", monster_count: 14,
         },
         RuinEnemyType::DemonImp => RuinEnemyDef {
-            name: "デーモンインプ", energy: 6,
+            name: "デーモンインプ", monster_count: 6,
         },
         // ボス敵
         RuinEnemyType::RuinGuardian => RuinEnemyDef {
-            name: "遺跡の守護者", energy: 25,
+            name: "遺跡の守護者", monster_count: 25,
         },
         RuinEnemyType::DragonZombie => RuinEnemyDef {
-            name: "ドラゴンゾンビ", energy: 30,
+            name: "ドラゴンゾンビ", monster_count: 30,
         },
         RuinEnemyType::LichLord => RuinEnemyDef {
-            name: "リッチロード", energy: 20,
+            name: "リッチロード", monster_count: 20,
         },
         RuinEnemyType::TitanColossus => RuinEnemyDef {
-            name: "タイタンコロッサス", energy: 40,
+            name: "タイタンコロッサス", monster_count: 40,
         },
     }
 }
@@ -242,8 +242,9 @@ pub struct RuinInfo {
     pub enemies: Vec<String>,
     /// 敵の表示名（3体）
     pub enemy_names: Vec<String>,
-    /// 敵のエナジー（3体）
-    pub enemy_energies: Vec<u32>,
+    /// 敵の魔獣数（3体）
+    #[serde(alias = "enemy_energies")]
+    pub enemy_monster_counts: Vec<u32>,
     /// 消滅時刻（Unix timestamp ms）
     #[serde(default)]
     pub expires_at: Option<u64>,
@@ -265,7 +266,11 @@ pub fn generate_ruin(_territory_id: &str) -> RuinInfo {
     
     let enemies: Vec<String> = formation.enemies.iter().map(|e| e.as_str().to_string()).collect();
     let enemy_names: Vec<String> = formation.enemies.iter().map(|e| get_ruin_enemy(*e).name.to_string()).collect();
-    let enemy_energies: Vec<u32> = formation.enemies.iter().map(|e| get_ruin_enemy(*e).energy).collect();
+    let enemy_monster_counts: Vec<u32> = formation
+        .enemies
+        .iter()
+        .map(|e| get_ruin_enemy(*e).monster_count)
+        .collect();
     
     // 現在時刻 + 有効時間
     let now_ms = std::time::SystemTime::now()
@@ -279,7 +284,7 @@ pub fn generate_ruin(_territory_id: &str) -> RuinInfo {
         difficulty,
         enemies,
         enemy_names,
-        enemy_energies,
+        enemy_monster_counts,
         expires_at: Some(expires_at),
     }
 }

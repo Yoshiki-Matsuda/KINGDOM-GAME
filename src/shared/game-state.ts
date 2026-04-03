@@ -4,7 +4,7 @@
  */
 
 /** 遺跡の難易度 */
-export type RuinDifficulty = "easy" | "normal" | "hard" | "extreme";
+export type RuinDifficulty = "normal" | "rare" | "legendary";
 
 /** 遺跡情報 */
 export interface RuinInfo {
@@ -16,8 +16,8 @@ export interface RuinInfo {
   enemies: string[];
   /** 敵の表示名（3体） */
   enemy_names?: string[];
-  /** 敵エナジー（3体） */
-  enemy_energies: number[];
+  /** 敵の魔獣数（3体） */
+  enemy_monster_counts: number[];
   /** 消滅時刻（Unix timestamp ms） */
   expires_at?: number;
 }
@@ -29,12 +29,19 @@ export interface Territory {
   level: number;
   owner_id?: string | null;
   troops: number;
-  /** 体ごとのエナジー。戦闘はこの順で1体ずつ行う */
-  body_energies?: number[] | null;
+  /** 体ごとのモンスター数。戦闘はこの順で1体ずつ行う */
+  body_monster_counts?: number[] | null;
   /** 体ごとの表示名（戦闘ログ用） */
   body_names?: string[] | null;
+  /** 前線基地フラグ（KC準拠: 占領地に建設して前線を拡大） */
+  is_base?: boolean;
   /** 遺跡情報（存在する場合） */
   ruin?: RuinInfo | null;
+  /** PvP拠点・塔の耐久（0で未使用） */
+  durability?: number;
+  max_durability?: number;
+  /** 塔レベル 1-7、通常マスは 0 */
+  tower_level?: number;
 }
 
 /** インベントリ内のアイテム */
@@ -56,6 +63,30 @@ export interface BuiltFacility {
 /** デフォルトのプレイヤーID（シングルプレイ時） */
 export const DEFAULT_PLAYER_ID = "player";
 
+/** KC準拠の4種基本資源 + ゴールド（フリマ用通貨） */
+export interface Resources {
+  food: number;
+  wood: number;
+  stone: number;
+  iron: number;
+  gold: number;
+}
+
+/** フリーマーケット出品物の種別 */
+export type MarketItemType =
+  | { type: "card"; card_id: number }
+  | { type: "item"; item_id: string; count: number }
+  | { type: "resource"; resource_type: string; amount: number };
+
+/** フリーマーケットの出品情報 */
+export interface MarketListing {
+  listing_id: string;
+  seller_id: string;
+  item: MarketItemType;
+  price: number;
+  listed_at: number;
+}
+
 /** プレイヤー固有のデータ */
 export interface PlayerData {
   /** プレイヤーID */
@@ -70,6 +101,27 @@ export interface PlayerData {
   owned_cards: number[];
   /** 援軍を送れる他プレイヤーのID（クラン・配下など） */
   allied_player_ids: string[];
+  /** 4種基本資源 */
+  resources?: Resources;
+  card_levels?: number[];
+  card_exp?: number[];
+  card_stamina?: number[];
+  exploration_level?: number;
+  exploration_score?: number;
+  unit_cost_cap?: number;
+  dungeon_points?: number;
+  charge_points?: number;
+  /** 進行中の探索派遣 */
+  explorations?: ExplorationMission[];
+}
+
+/** 探索ミッション（サーバーと同構造） */
+export interface ExplorationMission {
+  mission_id: string;
+  territory_id: string;
+  started_at: number;
+  completes_at: number;
+  card_indices: number[];
 }
 
 export interface GameState {
@@ -90,6 +142,48 @@ export interface GameState {
   facilities?: BuiltFacility[];
   /** プレイヤーの所持カード（シングルプレイ用） */
   owned_cards?: number[];
+  /** 4種基本資源（シングルプレイ用） */
+  resources?: Resources;
+  /** 同盟一覧 */
+  alliances?: Alliance[];
+  /** シーズン情報 */
+  season?: SeasonInfo;
+  /** フリーマーケット出品一覧 */
+  market_listings?: MarketListing[];
+  card_levels?: number[];
+  card_exp?: number[];
+  card_stamina?: number[];
+  exploration_level?: number;
+  exploration_score?: number;
+  unit_cost_cap?: number;
+  dungeon_points?: number;
+  charge_points?: number;
+  explorations?: ExplorationMission[];
+}
+
+/** KC準拠の同盟データ */
+export interface Alliance {
+  id: string;
+  name: string;
+  leader_id: string;
+  member_ids: string[];
+  territory_points: number;
+  level?: number;
+  donated_total?: number;
+  parent_alliance_id?: string | null;
+  child_alliance_ids?: string[];
+}
+
+/** KC準拠のシーズン情報 */
+export interface SeasonInfo {
+  season_number: number;
+  started_at: number;
+  duration_ms: number;
+}
+
+/** プレイヤーデータを取得（後方互換対応） */
+export function getPlayerData(state: GameState, playerId: string = DEFAULT_PLAYER_ID): PlayerData | null {
+  return state.players?.[playerId] ?? null;
 }
 
 /** プレイヤーのインベントリを取得（後方互換対応） */
@@ -102,9 +196,13 @@ export function getPlayerFacilities(state: GameState, playerId: string = DEFAULT
   return state.players?.[playerId]?.facilities ?? state.facilities ?? [];
 }
 
-/** プレイヤーの所持カードを取得 */
+/** プレイヤーの所持カードを取得（`players` が空配列でもトップレベル `owned_cards` にフォールバック） */
 export function getPlayerOwnedCards(state: GameState, playerId: string = DEFAULT_PLAYER_ID): number[] {
-  return state.players?.[playerId]?.owned_cards ?? state.owned_cards ?? [];
+  const fromPlayer = state.players?.[playerId]?.owned_cards;
+  const top = state.owned_cards ?? [];
+  if (Array.isArray(fromPlayer) && fromPlayer.length > 0) return fromPlayer;
+  if (top.length > 0) return top;
+  return Array.isArray(fromPlayer) ? fromPlayer : [];
 }
 
 /** プレイヤーが援軍を送れるowner_idリストを取得 */
@@ -141,12 +239,18 @@ export const LEVEL_TERRAIN: Record<number, string> = {
 
 /** カードのステータス */
 export interface CardStatsPayload {
-  energy: number;
+  monster_count: number;
   speed: number;
   attack: number;
-  magic: number;
+  intelligence: number;
   defense: number;
   magic_defense: number;
+  /** 射程 (1=近接, 2=中距離, 3=遠距離) */
+  range?: number;
+  /** ユニット編成コスト */
+  cost?: number;
+  /** 占拠力 */
+  occupation_power?: number;
 }
 
 /** スキルデータ（サーバー送信用） */
@@ -154,6 +258,7 @@ export interface SkillDataPayload {
   passive_id?: string;
   active_id: string;
   unique_id?: string;
+  skill_level?: number;
 }
 
 /** クライアントからサーバーへ送る行動（サーバーと同一構造） */
@@ -163,8 +268,8 @@ export type Action =
     action: "deploy";
     territory_id: string;
     count: number;
-    /** 援軍の体ごとのエナジー */
-    energy_per_body?: number[];
+    /** 援軍の体ごとのモンスター数 */
+    monsters_per_body?: number[];
     /** 援軍の体ごとの表示名 */
     body_names?: string[];
   }
@@ -173,8 +278,8 @@ export type Action =
     from_territory_id: string;
     to_territory_id: string;
     count: number;
-    /** 攻撃側の体ごとのエナジー（先頭から順に敵1体目・2体目…と戦闘） */
-    energy_per_body?: number[];
+    /** 攻撃側の体ごとのモンスター数（先頭から順に敵1体目・2体目…と戦闘） */
+    monsters_per_body?: number[];
     /** 攻撃側の体ごとの表示名（戦闘ログ用） */
     body_names?: string[];
     /** 攻撃するユニットの表示名（ログ用。例: ユニット1） */
@@ -185,21 +290,45 @@ export type Action =
     skills_per_body?: SkillDataPayload[];
     /** 攻撃側の体ごとの全ステータス */
     stats_per_body?: CardStatsPayload[];
-  };
+    /** 所持カード配列上のインデックス（スタミナ・XP用） */
+    owned_card_indices?: number[];
+  }
+  | {
+    action: "build_base";
+    territory_id: string;
+  }
+  | {
+      action: "synthesize_card";
+      base_card_index: number;
+      material_card_indices: number[];
+    }
+  | { action: "create_alliance"; name: string }
+  | { action: "join_alliance"; alliance_id: string }
+  | { action: "leave_alliance" }
+  | { action: "list_on_flea_market"; item: MarketItemType; price: number }
+  | { action: "buy_from_flea_market"; listing_id: string }
+  | { action: "cancel_flea_market_listing"; listing_id: string }
+  | { action: "start_exploration"; territory_id: string; card_indices: number[] }
+  | { action: "collect_exploration"; mission_id: string }
+  | { action: "donate_alliance"; food: number; wood: number; stone: number; iron: number };
 
 export const END_TURN_ACTION: Action = { action: "end_turn" };
+
+export function buildBaseAction(territoryId: string): Action {
+  return { action: "build_base", territory_id: territoryId };
+}
 
 export function deployAction(
   territoryId: string,
   count: number,
-  energyPerBody?: number[],
+  monstersPerBody?: number[],
   bodyNames?: string[]
 ): Action {
   return {
     action: "deploy",
     territory_id: territoryId,
     count,
-    ...(energyPerBody != null && energyPerBody.length === count && { energy_per_body: energyPerBody }),
+    ...(monstersPerBody != null && monstersPerBody.length === count && { monsters_per_body: monstersPerBody }),
     ...(bodyNames != null && bodyNames.length === count && { body_names: bodyNames }),
   };
 }
@@ -208,23 +337,26 @@ export function attackAction(
   fromTerritoryId: string,
   toTerritoryId: string,
   count: number,
-  energyPerBody?: number[],
+  monstersPerBody?: number[],
   bodyNames?: string[],
   unitName?: string,
   speedPerBody?: number[],
   skillsPerBody?: SkillDataPayload[],
-  statsPerBody?: CardStatsPayload[]
+  statsPerBody?: CardStatsPayload[],
+  ownedCardIndices?: number[]
 ): Action {
   return {
     action: "attack",
     from_territory_id: fromTerritoryId,
     to_territory_id: toTerritoryId,
     count,
-    ...(energyPerBody != null && energyPerBody.length === count && { energy_per_body: energyPerBody }),
+    ...(monstersPerBody != null && monstersPerBody.length === count && { monsters_per_body: monstersPerBody }),
     ...(bodyNames != null && bodyNames.length === count && { body_names: bodyNames }),
     ...(unitName != null && unitName !== "" && { unit_name: unitName }),
     ...(speedPerBody != null && speedPerBody.length === count && { speed_per_body: speedPerBody }),
     ...(skillsPerBody != null && skillsPerBody.length === count && { skills_per_body: skillsPerBody }),
     ...(statsPerBody != null && statsPerBody.length === count && { stats_per_body: statsPerBody }),
+    ...(ownedCardIndices != null &&
+      ownedCardIndices.length === count && { owned_card_indices: ownedCardIndices }),
   };
 }

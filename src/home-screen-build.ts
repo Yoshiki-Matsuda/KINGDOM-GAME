@@ -41,15 +41,11 @@ export function createFacilityBuildState(
     inventory,
     expansionLevel,
     getHomeFacility,
-    isCastleTile,
     devMode,
     devBuildTimeSeconds,
   } = context;
 
-  const isExpansion = facilityId === "home_expansion";
-
-  if (!isExpansion && level === 1 && !selectedTile) return null;
-  if (isExpansion && (!selectedTile || !isCastleTile(selectedTile.col, selectedTile.row))) return null;
+  if (level === 1 && !selectedTile) return null;
   if (level === 1 && existingFacilities.some((facility) => facility.facility_id === facilityId)) return null;
 
   const facility = FACILITIES[facilityId];
@@ -76,7 +72,6 @@ export function createFacilityBuildState(
   const nextFacilities = [...existingFacilities];
   const existingIndex = nextFacilities.findIndex((builtFacility) => {
     if (builtFacility.facility_id !== facilityId) return false;
-    if (isExpansion) return true;
     if (!selectedTile) return true;
     if (builtFacility.position) {
       return (
@@ -104,7 +99,7 @@ export function createFacilityBuildState(
     };
   }
 
-  const position = !isExpansion && selectedTile
+  const position = selectedTile
     ? { col: selectedTile.col, row: selectedTile.row }
     : undefined;
   nextFacilities.push({
@@ -117,7 +112,7 @@ export function createFacilityBuildState(
   return {
     inventory: nextInventory,
     facilities: nextFacilities,
-    placedFacility: !isExpansion && selectedTile
+    placedFacility: selectedTile
       ? { col: selectedTile.col, row: selectedTile.row, facilityId }
       : null,
   };

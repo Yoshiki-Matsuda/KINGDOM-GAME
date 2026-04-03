@@ -23,7 +23,7 @@ use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use app_state::AppState;
-use model::{cleanup_expired_ruins, GameState};
+use model::{cleanup_expired_ruins, reconcile_singleplayer_after_load, GameState};
 use persistence::{load_state, save_state, state_path};
 use ruin_scheduler::spawn_ruin_scheduler;
 
@@ -44,7 +44,10 @@ async fn main() {
             default
         }
     };
-    
+
+    reconcile_singleplayer_after_load(&mut game);
+    model::migrate_log_timestamps(&mut game);
+
     // 起動時に期限切れの遺跡をクリーンアップ
     if cleanup_expired_ruins(&mut game) {
         let _ = save_state(&state_path, &game).await;
@@ -58,7 +61,8 @@ async fn main() {
         println!("[kingdom-server] DEV_AUTO_WIN=1: 攻撃側10倍有利（ローカル開発モード）");
     }
 
-    let (broadcast_tx, _) = broadcast::channel(32);
+    // 戦闘処理中にブロードキャストが留まりすぎると RecvError::Lagged になるため余裕を持たせる
+    let (broadcast_tx, _) = broadcast::channel(256);
     let app_state = AppState {
         game: Arc::new(RwLock::new(game)),
         broadcast_tx,
@@ -84,15 +88,33 @@ async fn main() {
         .with_state(app_state);
     spawn_ruin_scheduler(ruin_state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3000);
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
     println!("[kingdom-server] listening on http://{}", addr);
     println!("  GET /health      -> ヘルスチェック");
     println!("  GET /api/state   -> 現在のゲーム状態（JSON）");
-    println!("  POST /admin/wipe -> ワイプ（完全初期化。メンテ再起動では使わない）curl -X POST http://127.0.0.1:3000/admin/wipe");
+    println!(
+        "  POST /admin/wipe -> ワイプ（完全初期化。メンテ再起動では使わない）curl -X POST http://127.0.0.1:{}/admin/wipe",
+        port
+    );
     println!("  GET /ws          -> WebSocket（状態配信・行動受付）");
     println!("  行動例: 送信 {{\"action\":\"end_turn\"}} でターン進行");
     println!("  遺跡: 60秒ごとにスポーン判定、最大3個");
+    println!("  （ポートが使用中なら: 別ターミナルのサーバーを止めるか PORT=3001 などで起動）");
 
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            eprintln!(
+                "[kingdom-server] エラー: {} は既に使用中です（別の kingdom-server や他プロセスを終了するか PORT 環境変数で別ポートを指定してください）。",
+                addr
+            );
+            std::process::exit(1);
+        }
+        Err(e) => panic!("bind: {e}"),
+    };
     axum::serve(listener, app).await.expect("serve");
 }

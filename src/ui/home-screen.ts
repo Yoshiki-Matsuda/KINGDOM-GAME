@@ -5,19 +5,18 @@
 import {
   setCurrentScreen,
   gameState,
-  bodyEnergies,
+  bodyMonsterCounts,
   getHomeFacility,
   setHomeFacility,
   render,
 } from "../store";
 import { replaceLocalPlayerState } from "../store-actions";
-import { DEFAULT_BODY_ENERGY } from "../game/characters";
+import { DEFAULT_BODY_MONSTER_COUNT } from "../game/characters";
 import { initHomeMapView, updateHomeMapView } from "../home-map-view";
 import {
   FACILITIES,
   FACILITY_CATEGORIES,
   getFacilitiesByCategory,
-  getHomeExpansionFacility,
   canBuildFacility,
   meetsExpansionRequirement,
   type FacilityId,
@@ -47,7 +46,7 @@ let _buildMenuDocListener: ((e: MouseEvent) => void) | null = null;
 void _buildMenuTarget;
 void _buildMenuDocListener;
 let homeMapInitialized = false;
-let selectedCategory: FacilityCategory = "production";
+let selectedCategory: FacilityCategory = "resource";
 let buildingTimerId: number | null = null;
 let selectedTile: { col: number; row: number } | null = null;
 
@@ -193,7 +192,7 @@ function hideBuildMenu(): void {
 
 function renderHomeContent(): void {
   const homeTroops = gameState.territories.find((t) => t.id === `c_${HOME_COL}_${HOME_ROW}`)?.troops ?? 0;
-  const totalEnergy = Array.from({ length: homeTroops }, (_, i) => bodyEnergies[i] ?? DEFAULT_BODY_ENERGY).reduce((a, b) => a + b, 0);
+  const totalMonsters = Array.from({ length: homeTroops }, (_, i) => bodyMonsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT).reduce((a, b) => a + b, 0);
   const bonuses = getFacilityBonusesForState(gameState);
 
   let header = homeEl.querySelector(".home-screen-header");
@@ -205,9 +204,9 @@ function renderHomeContent(): void {
   header.innerHTML = `
     <h1 class="home-screen-title">本拠地</h1>
     <div class="home-screen-stats">
-      <span>エナジー: ${totalEnergy}</span>
-      ${bonuses.energyBonus > 0 ? `<span class="bonus">+${bonuses.energyBonus}</span>` : ""}
-      ${bonuses.energyPercent > 0 ? `<span class="bonus">+${bonuses.energyPercent}%</span>` : ""}
+      <span>魔獣数: ${totalMonsters}</span>
+      ${bonuses.monsterBonus > 0 ? `<span class="bonus">+${bonuses.monsterBonus}</span>` : ""}
+      ${bonuses.monsterPercent > 0 ? `<span class="bonus">+${bonuses.monsterPercent}%</span>` : ""}
     </div>
     <button type="button" class="home-screen-back" data-home-back>マップへ戻る</button>
   `;
@@ -255,51 +254,10 @@ function renderFacilityPanel(): void {
   facilityPanelEl.style.display = "";
 
   if (isCastleTile(selectedTile.col, selectedTile.row)) {
-    const facility = getHomeExpansionFacility();
-    if (!facility) {
-      facilityPanelEl.innerHTML = renderPanelHeader({
-        title: "🏰 城",
-        subtitle: "本拠地の中心",
-      });
-    } else {
-      const built = facilities.find((entry) => entry.facility_id === facility.id);
-      const currentLevel = built?.level ?? 0;
-      const isBuilding = !!(built?.build_complete_at && built.build_complete_at > Date.now());
-      const nextLevel = currentLevel + 1;
-      const levelDef = facility.levels[nextLevel - 1];
-      const isMaxLevel = currentLevel >= facility.maxLevel;
-      const canBuildNow = !!(levelDef && canBuildFacility(facility.id, nextLevel, inventory, expansionLevel) && !isBuilding);
-
-      const cardHtml = renderFacilityCard({
-        icon: facility.icon,
-        name: facility.name,
-        description: facility.description,
-        currentLevel,
-        isBuilding,
-        isMaxLevel,
-        buildCompleteAt: built?.build_complete_at,
-        nextEffectHtml: !isMaxLevel && levelDef ? levelDef.description : undefined,
-        costHtml: !isMaxLevel && levelDef ? renderFacilityCosts(levelDef.cost, inventory) : undefined,
-        buttonHtml: !isMaxLevel && levelDef
-          ? renderFacilityBuildButton(
-              facility.id,
-              nextLevel,
-              isBuilding ? "建設中" : currentLevel === 0 ? "拡張" : "レベルアップ",
-              canBuildNow,
-            )
-          : undefined,
-      });
-
-      facilityPanelEl.innerHTML = `
-        ${renderPanelHeader({
-          title: "🏰 城 — 本拠地拡張",
-          subtitle: "本拠地の中心で領地を拡大",
-        })}
-        <div class="facility-list facility-list--expansion">
-          ${cardHtml}
-        </div>
-      `;
-    }
+    facilityPanelEl.innerHTML = renderPanelHeader({
+      title: "🏰 城",
+      subtitle: "本拠地の中心",
+    });
     bindFacilityPanelListeners();
     updateBuildingTimers();
     return;

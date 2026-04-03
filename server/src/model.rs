@@ -3,7 +3,7 @@
 //! 設計: サーバー権威・データ駆動。状態更新は純粋関数 `apply_action` のみ。
 //! 最終形 PvPvE を想定し、owner_id でプレイヤー／中立を区別。
 
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,45 @@ pub const DEFAULT_PLAYER_ID: &str = "player";
 /// 本拠地のデフォルト座標
 pub const HOME_COL: u8 = 24;
 pub const HOME_ROW: u8 = 24;
+
+/// KC準拠の4種基本資源 + ゴールド（フリマ用通貨）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Resources {
+    pub food: u64,
+    pub wood: u64,
+    pub stone: u64,
+    pub iron: u64,
+    #[serde(default)]
+    pub gold: u64,
+}
+
+impl Default for Resources {
+    fn default() -> Self {
+        Self { food: 500, wood: 500, stone: 500, iron: 500, gold: 1000 }
+    }
+}
+
+/// フリーマーケット出品物の種別
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum MarketItemType {
+    #[serde(rename = "card")]
+    Card { card_id: u32 },
+    #[serde(rename = "item")]
+    Item { item_id: String, count: u32 },
+    #[serde(rename = "resource")]
+    Resource { resource_type: String, amount: u64 },
+}
+
+/// フリーマーケットの出品情報
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketListing {
+    pub listing_id: String,
+    pub seller_id: String,
+    pub item: MarketItemType,
+    pub price: u64,
+    pub listed_at: u64,
+}
 
 /// プレイヤー固有のデータ
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,9 +74,53 @@ pub struct PlayerData {
     /// 所持カード（カードID）
     #[serde(default)]
     pub owned_cards: Vec<u32>,
+    #[serde(default)]
+    pub card_skill_levels: std::collections::HashMap<usize, [u8; 3]>,
     /// 援軍を送れる他プレイヤーのID（クラン・配下など）
     #[serde(default)]
     pub allied_player_ids: Vec<String>,
+    /// 4種基本資源（食料・木材・石材・鉄）
+    #[serde(default)]
+    pub resources: Resources,
+    /// 最後に資源を回収した時刻（Unix timestamp ms）
+    #[serde(default = "default_now_ms")]
+    pub last_resource_tick: u64,
+    /// 所持カードごとのレベル（owned_cards と同じ長さ）
+    #[serde(default)]
+    pub card_levels: Vec<u32>,
+    /// 所持カードごとの経験値
+    #[serde(default)]
+    pub card_exp: Vec<u64>,
+    /// 所持カードごとのスタミナ（KC: 出撃・探索に使用）
+    #[serde(default)]
+    pub card_stamina: Vec<u32>,
+    /// 探索レベル（同時派遣数に影響）
+    #[serde(default)]
+    pub exploration_level: u32,
+    /// 探索スコア（探索レベルアップ用）
+    #[serde(default)]
+    pub exploration_score: u64,
+    /// ユニットコスト上限（KC: 初期4.0、伝承資料庫等で増加）
+    #[serde(default = "default_unit_cost_cap")]
+    pub unit_cost_cap: f32,
+    /// DP（ダンジョンポイント・合成等）
+    #[serde(default)]
+    pub dungeon_points: u64,
+    /// CP（課金ポイント相当・開発用）
+    #[serde(default)]
+    pub charge_points: u64,
+    #[serde(default)]
+    pub explorations: Vec<ExplorationMission>,
+}
+fn default_unit_cost_cap() -> f32 {
+    4.0
+}
+
+pub(crate) fn default_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 impl PlayerData {
@@ -48,9 +131,55 @@ impl PlayerData {
             inventory: default_dev_inventory(),
             facilities: vec![],
             owned_cards: default_owned_cards(),
+            card_skill_levels: std::collections::HashMap::new(),
             allied_player_ids: vec![],
+            resources: Resources::default(),
+            last_resource_tick: default_now_ms(),
+            card_levels: vec![],
+            card_exp: vec![],
+            card_stamina: vec![],
+            exploration_level: 1,
+            exploration_score: 0,
+            unit_cost_cap: default_unit_cost_cap(),
+            dungeon_points: 0,
+            charge_points: 0,
+            explorations: vec![],
         }
     }
+}
+
+/// KC準拠の同盟データ
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Alliance {
+    pub id: String,
+    pub name: String,
+    pub leader_id: String,
+    pub member_ids: Vec<String>,
+    /// 同盟の保有ポイント（領地レベル合計で毎ターン加算）
+    #[serde(default)]
+    pub territory_points: u64,
+    #[serde(default = "default_alliance_level")]
+    pub level: u32,
+    #[serde(default)]
+    pub donated_total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_alliance_id: Option<String>,
+    #[serde(default)]
+    pub child_alliance_ids: Vec<String>,
+}
+fn default_alliance_level() -> u32 {
+    1
+}
+
+/// 探索派遣（KC準拠・ホーム外領地への時間経過ミッション）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplorationMission {
+    pub mission_id: String,
+    pub territory_id: String,
+    pub started_at: u64,
+    pub completes_at: u64,
+    #[serde(default)]
+    pub card_indices: Vec<usize>,
 }
 
 /// 建設済み施設
@@ -75,17 +204,29 @@ pub struct Territory {
     /// 所有者 ID。None は中立
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<String>,
-    /// 配置エナジー（体数）
+    /// 配置魔獣数（体数）
     pub troops: u32,
-    /// 体ごとのエナジー。len() == troops のときのみ有効。未設定時は戦闘で各体を1として扱う。
+    /// 体ごとのモンスター数。len() == troops のときのみ有効。未設定時は戦闘で各体を1として扱う。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body_energies: Option<Vec<u32>>,
+    pub body_monster_counts: Option<Vec<u32>>,
     /// 体ごとの表示名（戦闘ログ用）。len() == troops のときのみ有効。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_names: Option<Vec<String>>,
     /// 遺跡情報（存在する場合）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ruin: Option<RuinInfo>,
+    /// 前線基地フラグ（KC準拠: 占領地に建設して前線を拡大）
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_base: bool,
+    /// 現在の耐久値（PvP拠点・塔）。0なら中立即占領互換
+    #[serde(default)]
+    pub durability: u32,
+    /// 最大耐久値
+    #[serde(default)]
+    pub max_durability: u32,
+    /// 塔レベル（1-7）。0は通常マス
+    #[serde(default)]
+    pub tower_level: u8,
 }
 
 fn default_level() -> u8 {
@@ -131,6 +272,62 @@ pub struct GameState {
     /// プレイヤーの所持カード（シングルプレイ用）
     #[serde(default)]
     pub owned_cards: Vec<u32>,
+    #[serde(default)]
+    pub card_skill_levels: std::collections::HashMap<usize, [u8; 3]>,
+    /// 4種基本資源（シングルプレイ用、players からのコピー）
+    #[serde(default)]
+    pub resources: Resources,
+    /// 同盟一覧（KC準拠: 複数プレイヤーが同盟を結成）
+    #[serde(default)]
+    pub alliances: Vec<Alliance>,
+    /// シーズン情報
+    #[serde(default)]
+    pub season: SeasonInfo,
+    /// フリーマーケット出品一覧
+    #[serde(default)]
+    pub market_listings: Vec<MarketListing>,
+    /// シングルプレイ用: カードごとのレベル（owned_cards と同じ長さ）
+    #[serde(default)]
+    pub card_levels: Vec<u32>,
+    #[serde(default)]
+    pub card_exp: Vec<u64>,
+    #[serde(default)]
+    pub card_stamina: Vec<u32>,
+    #[serde(default)]
+    pub exploration_level: u32,
+    #[serde(default)]
+    pub exploration_score: u64,
+    #[serde(default = "default_unit_cost_cap")]
+    pub unit_cost_cap: f32,
+    #[serde(default)]
+    pub dungeon_points: u64,
+    #[serde(default)]
+    pub charge_points: u64,
+    #[serde(default)]
+    pub explorations: Vec<ExplorationMission>,
+}
+
+/// KC準拠のシーズン情報（一定期間でマップ・領地リセット）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeasonInfo {
+    pub season_number: u32,
+    /// シーズン開始時刻（Unix timestamp ms）
+    pub started_at: u64,
+    /// シーズン期間（ms）。デフォルト90日
+    pub duration_ms: u64,
+}
+
+impl Default for SeasonInfo {
+    fn default() -> Self {
+        Self {
+            season_number: 1,
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            duration_ms: 90 * 24 * 60 * 60 * 1000,
+        }
+    }
 }
 
 impl GameState {
@@ -145,7 +342,12 @@ pub(crate) fn build_game_state(
     inventory: Vec<InventoryItem>,
     facilities: Vec<BuiltFacility>,
     owned_cards: Vec<u32>,
+    card_skill_levels: std::collections::HashMap<usize, [u8; 3]>,
 ) -> GameState {
+    let resources = players.get(DEFAULT_PLAYER_ID)
+        .map(|p| p.resources.clone())
+        .unwrap_or_default();
+    let p = players.get(DEFAULT_PLAYER_ID).cloned();
     GameState {
         turn,
         phase: state.phase.clone(),
@@ -156,10 +358,24 @@ pub(crate) fn build_game_state(
         inventory,
         facilities,
         owned_cards,
+        card_skill_levels,
+        resources,
+        alliances: state.alliances.clone(),
+        season: state.season.clone(),
+        market_listings: state.market_listings.clone(),
+        card_levels: p.as_ref().map(|x| x.card_levels.clone()).unwrap_or_else(|| state.card_levels.clone()),
+        card_exp: p.as_ref().map(|x| x.card_exp.clone()).unwrap_or_else(|| state.card_exp.clone()),
+        card_stamina: p.as_ref().map(|x| x.card_stamina.clone()).unwrap_or_else(|| state.card_stamina.clone()),
+        exploration_level: p.as_ref().map(|x| x.exploration_level).unwrap_or(state.exploration_level),
+        exploration_score: p.as_ref().map(|x| x.exploration_score).unwrap_or(state.exploration_score),
+        unit_cost_cap: p.as_ref().map(|x| x.unit_cost_cap).unwrap_or(state.unit_cost_cap),
+        dungeon_points: p.as_ref().map(|x| x.dungeon_points).unwrap_or(state.dungeon_points),
+        charge_points: p.as_ref().map(|x| x.charge_points).unwrap_or(state.charge_points),
+        explorations: p.as_ref().map(|x| x.explorations.clone()).unwrap_or_else(|| state.explorations.clone()),
     }
 }
 
-pub(crate) const MAX_LOG_LINES: usize = 200;
+pub(crate) const MAX_LOG_LINES: usize = 2000;
 
 impl Default for GameState {
     fn default() -> Self {
@@ -177,11 +393,24 @@ impl Default for GameState {
             territories: default_territories(),
             log: vec![],
             players,
-            // 後方互換性のため直接フィールドにもコピー
             deployable_owner_ids: vec![],
-            inventory: default_player.inventory,
-            owned_cards: default_player.owned_cards,
-            facilities: default_player.facilities,
+            inventory: default_player.inventory.clone(),
+            owned_cards: default_player.owned_cards.clone(),
+            card_skill_levels: default_player.card_skill_levels.clone(),
+            facilities: default_player.facilities.clone(),
+            resources: default_player.resources,
+            alliances: vec![],
+            season: SeasonInfo::default(),
+            market_listings: vec![],
+            card_levels: vec![],
+            card_exp: vec![],
+            card_stamina: vec![],
+            exploration_level: 1,
+            exploration_score: 0,
+            unit_cost_cap: default_unit_cost_cap(),
+            dungeon_points: 0,
+            charge_points: 0,
+            explorations: vec![],
         }
     }
 }
@@ -233,9 +462,28 @@ pub(crate) fn territory_name<'a>(territories: &'a [Territory], id: &'a str) -> &
 }
 
 pub(crate) fn push_log(log: &mut Vec<String>, line: String) {
-    log.push(line);
+    let ts = default_now_ms();
+    log.push(format!("[ts:{}]{}", ts, line));
     if log.len() > MAX_LOG_LINES {
         log.drain(0..log.len() - MAX_LOG_LINES);
+    }
+}
+
+/// 旧ログ（[ts:] プレフィックスなし）にタイムスタンプを付与するマイグレーション。
+/// 既存行は起動時刻から逆算して等間隔に並べる。
+pub fn migrate_log_timestamps(state: &mut GameState) {
+    let now = default_now_ms();
+    let total = state.log.len() as u64;
+    if total == 0 { return; }
+    let mut migrated = false;
+    for (i, line) in state.log.iter_mut().enumerate() {
+        if line.starts_with("[ts:") { continue; }
+        let synthetic_ts = now.saturating_sub((total - i as u64) * 500);
+        *line = format!("[ts:{}]{}", synthetic_ts, line);
+        migrated = true;
+    }
+    if migrated {
+        println!("[kingdom-server] 旧ログ {} 件にタイムスタンプを付与しました", total);
     }
 }
 
@@ -251,6 +499,9 @@ fn terrain_name(level: u8) -> &'static str {
         4 => "山地",
         5 => "山岳",
         6 => "川",
+        7 => "深域",
+        8 => "険境",
+        9 => "魔境",
         _ => "平原",
     }
 }
@@ -259,7 +510,7 @@ fn terrain_name(level: u8) -> &'static str {
 fn random_level_grid() -> Vec<Vec<u8>> {
     let mut rng = rand::thread_rng();
     let grid: Vec<Vec<u8>> = (0..GRID_ROWS as usize)
-        .map(|_| (0..GRID_COLS as usize).map(|_| rng.gen_range(1..=5)).collect())
+        .map(|_| (0..GRID_COLS as usize).map(|_| rng.gen_range(1..=9)).collect())
         .collect();
     // 隣接と平均してまとまりのある地形に（1〜5のみ）
     let mut next = grid.clone();
@@ -283,7 +534,7 @@ fn random_level_grid() -> Vec<Vec<u8>> {
                 sum += grid[row][col + 1] as u32;
                 n += 1;
             }
-            next[row][col] = (sum / n).clamp(1, 5) as u8;
+            next[row][col] = (sum / n).clamp(1, 9) as u8;
         }
     }
     // 川(6)を約3%のマスにランダム配置（スムージングでは川が出ないため別途追加）
@@ -300,29 +551,47 @@ fn random_level_grid() -> Vec<Vec<u8>> {
 /// レベルに対応するカードID
 fn level_to_card_id(level: u8) -> u32 {
     match level {
-        1 => 10, // スライム
-        2 => 11, // ゴブリン
+        1 => 10, // ゴブリン
+        2 => 11, // コボルド
         3 => 12, // オーク
-        4 => 13, // 骸骨戦士
-        5 => 14, // オーガ
-        _ => 15, // ワイバーン
+        4 => 13, // スケルトン
+        5 => 14, // トロール
+        _ => 15, // ドレイク
+    }
+}
+
+/// 領地レベルに対する連戦数（KC準拠: Lv4以上で連戦）
+pub(crate) fn wave_count_for_level(level: u8) -> u32 {
+    match level {
+        1..=5 => 1,
+        6 => 2,
+        7..=8 => 2,
+        _ => 3,
     }
 }
 
 /// 全マスを領地として生成。id は c_{col}_{row}。本拠地 (24,24) のみプレイヤー所有。地形はランダム。
 /// レベルに応じた中立地の敵を生成（カード定義を使用）
 pub(crate) fn generate_neutral_enemies(level: u8) -> (u32, Vec<u32>, Vec<String>) {
-    let card_id = level_to_card_id(level);
-    let card = get_card(card_id).unwrap_or_else(|| get_card(10).unwrap()); // fallback to slime
-    
-    let count = 3u32;
-    let energies = vec![card.stats.energy; count as usize];
-    let names = vec![
-        format!("{}A", card.name),
-        format!("{}B", card.name),
-        format!("{}C", card.name),
-    ];
-    (count, energies, names)
+    let (card_id, count, mc_per_body): (u32, u32, u32) = match level {
+        1 => (10, 1, 50),       // Lv1×1, 50
+        2 => (11, 1, 250),      // Lv3相当×1, 250
+        3 => (12, 2, 250),      // Lv5×2, 各250
+        4 => (13, 2, 500),      // Lv10×2, 各500
+        5 => (14, 3, 1500),     // Lv15×3, 各1500
+        6 => (14, 3, 3500),     // Lv20×3, 各3500（トロール代表）
+        7 => (35, 2, 6000),     // Lv30×2, 各6000
+        8 => (43, 3, 8500),     // Lv55×3, 各8500（タイタン代表）
+        9 => (40, 3, 9000),     // Lv70×3, 各9000（ニーズヘッグ代表）
+        _ => (40, 3, 9000),
+    };
+    let card = get_card(card_id).unwrap_or_else(|| get_card(10).unwrap());
+    let monster_counts = vec![mc_per_body; count as usize];
+    let suffixes = ["A", "B", "C"];
+    let names: Vec<String> = (0..count as usize)
+        .map(|i| format!("{}{}", card.name, suffixes.get(i).unwrap_or(&"")))
+        .collect();
+    (count, monster_counts, names)
 }
 
 /// 遺跡はバックグラウンドタスクで動的にスポーンする（突発イベント）。
@@ -343,22 +612,30 @@ fn default_territories() -> Vec<Territory> {
                     level,
                     owner_id: Some(DEFAULT_PLAYER_ID.to_string()),
                     troops: 10,
-                    body_energies: Some(vec![10u32; 10]),
+                    body_monster_counts: Some(vec![10u32; 10]),
                     body_names: None,
                     ruin: None,
+                    is_base: true,
+                    durability: 0,
+                    max_durability: 0,
+                    tower_level: 0,
                 });
             } else {
-                // 中立マス: レベルに応じた敵を配置
-                let (troops, body_energies, body_names) = generate_neutral_enemies(level);
+                // 中立マス: レベルに応じた敵を配置。耐久なし＝戦闘勝利で即占領（PvP拠点のみ耐久を使う）
+                let (troops, body_monster_counts, body_names) = generate_neutral_enemies(level);
                 out.push(Territory {
                     id,
                     name,
                     level,
                     owner_id: None,
                     troops,
-                    body_energies: Some(body_energies),
+                    body_monster_counts: Some(body_monster_counts),
                     body_names: Some(body_names),
                     ruin: None,
+                    is_base: false,
+                    durability: 0,
+                    max_durability: 0,
+                    tower_level: 0,
                 });
             }
         }
@@ -366,16 +643,7 @@ fn default_territories() -> Vec<Territory> {
     out
 }
 
-/// カードの全ステータス
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CardStats {
-    pub energy: u32,
-    pub speed: u32,
-    pub attack: u32,
-    pub magic: u32,
-    pub defense: u32,
-    pub magic_defense: u32,
-}
+pub use crate::cards::CardStats;
 
 /// クライアントから送る行動。JSON の action は小文字スネーク（クライアントと一致）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -388,9 +656,9 @@ pub enum Action {
     Deploy {
         territory_id: String,
         count: u32,
-        /// 援軍の体ごとのエナジー。未指定時は各1として扱う。
+        /// 援軍の体ごとのモンスター数。未指定時は各1として扱う。
         #[serde(default)]
-        energy_per_body: Option<Vec<u32>>,
+        monsters_per_body: Option<Vec<u32>>,
         /// 援軍の体ごとの表示名。
         #[serde(default)]
         body_names: Option<Vec<String>>,
@@ -401,9 +669,9 @@ pub enum Action {
         from_territory_id: String,
         to_territory_id: String,
         count: u32,
-        /// 攻撃側の体ごとのエナジー（先頭から順に敵1体目・2体目…と戦闘）。未指定時は各体を1として扱う。
+        /// 攻撃側の体ごとのモンスター数（先頭から順に敵1体目・2体目…と戦闘）。未指定時は各体を1として扱う。
         #[serde(default)]
-        energy_per_body: Option<Vec<u32>>,
+        monsters_per_body: Option<Vec<u32>>,
         /// 攻撃側の体ごとの表示名（戦闘ログ用）。未指定時は「味方ユニットN」。
         #[serde(default)]
         body_names: Option<Vec<String>>,
@@ -419,6 +687,69 @@ pub enum Action {
         /// 攻撃側の体ごとの全ステータス。
         #[serde(default)]
         stats_per_body: Option<Vec<CardStats>>,
+        /// 編成に対応する所持カードインデックス（スタミナ・XP用。クライアントが付与）
+        #[serde(default)]
+        owned_card_indices: Option<Vec<usize>>,
+    },
+    /// 占領済み領地に前線基地を建設（KC準拠: 前線を拡大し施設スロット追加）
+    #[serde(rename = "build_base")]
+    BuildBase {
+        territory_id: String,
+    },
+    /// カード合成（KC準拠: 素材カードを消費してベースカードのスキルLvアップ or スキル移植）
+    #[serde(rename = "synthesize_card")]
+    SynthesizeCard {
+        base_card_index: usize,
+        material_card_indices: Vec<usize>,
+    },
+    /// 同盟結成（KC準拠）
+    #[serde(rename = "create_alliance")]
+    CreateAlliance {
+        name: String,
+    },
+    /// 同盟参加
+    #[serde(rename = "join_alliance")]
+    JoinAlliance {
+        alliance_id: String,
+    },
+    /// 同盟脱退
+    #[serde(rename = "leave_alliance")]
+    LeaveAlliance,
+    /// フリマ出品
+    #[serde(rename = "list_on_flea_market")]
+    ListOnFleaMarket {
+        item: MarketItemType,
+        price: u64,
+    },
+    /// フリマ購入
+    #[serde(rename = "buy_from_flea_market")]
+    BuyFromFleaMarket {
+        listing_id: String,
+    },
+    /// フリマ出品取消
+    #[serde(rename = "cancel_flea_market_listing")]
+    CancelFleaMarketListing {
+        listing_id: String,
+    },
+    /// 探索を開始（占領済み領地・同時派遣数は exploration_level まで）
+    #[serde(rename = "start_exploration")]
+    StartExploration {
+        territory_id: String,
+        #[serde(default)]
+        card_indices: Vec<usize>,
+    },
+    /// 探索結果を回収
+    #[serde(rename = "collect_exploration")]
+    CollectExploration {
+        mission_id: String,
+    },
+    /// 同盟へ資源寄付（同盟レベル・寄付累計が増加）
+    #[serde(rename = "donate_alliance")]
+    DonateAlliance {
+        food: u64,
+        wood: u64,
+        stone: u64,
+        iron: u64,
     },
 }
 
@@ -433,6 +764,37 @@ pub(crate) fn is_home_territory(id: &str) -> bool {
 
 pub(crate) fn home_territory_id() -> String {
     format!("c_{}_{}", HOME_COL, HOME_ROW)
+}
+
+/// シングルプレイ: 旧セーブで `players` が空・または `owned_cards` だけトップレベルにある場合の補正用。
+pub(crate) fn merge_legacy_into_working_players(
+    legacy_owned_cards: &[u32],
+    players: &mut HashMap<String, PlayerData>,
+) {
+    match players.entry(DEFAULT_PLAYER_ID.to_string()) {
+        Entry::Vacant(v) => {
+            let mut pd = PlayerData::new(DEFAULT_PLAYER_ID.to_string(), home_territory_id());
+            if !legacy_owned_cards.is_empty() {
+                pd.owned_cards = legacy_owned_cards.to_vec();
+            }
+            v.insert(pd);
+        }
+        Entry::Occupied(mut o) => {
+            if o.get().owned_cards.is_empty() && !legacy_owned_cards.is_empty() {
+                o.get_mut().owned_cards = legacy_owned_cards.to_vec();
+            }
+        }
+    }
+}
+
+/// 永続化ロード直後: `player` エントリとトップレベル `owned_cards` を揃える。
+pub fn reconcile_singleplayer_after_load(state: &mut GameState) {
+    merge_legacy_into_working_players(&state.owned_cards, &mut state.players);
+    if let Some(p) = state.players.get(DEFAULT_PLAYER_ID) {
+        if state.owned_cards.is_empty() && !p.owned_cards.is_empty() {
+            state.owned_cards = p.owned_cards.clone();
+        }
+    }
 }
 
 /// c_{col}_{row} 形式の ID から (col, row) を取得。
@@ -452,17 +814,62 @@ pub(crate) fn parse_territory_id(id: &str) -> Option<(u8, u8)> {
     }
 }
 
-/// 攻撃可能な目標か。本拠地または自領に隣接しているマスのみ（4方向）。
-pub(crate) fn is_attackable_target(territories: &[Territory], target_id: &str) -> bool {
+/// 攻撃時に「拠点を前線とみなす」オーナーID（自プレイヤー・援軍先・同盟メンバー）
+pub(crate) fn attack_base_owner_ids(state: &GameState, acting_player_id: &str) -> Vec<String> {
+    let mut ids: Vec<String> = vec![acting_player_id.to_string()];
+    for oid in &state.deployable_owner_ids {
+        if !ids.iter().any(|x| x == oid) {
+            ids.push(oid.clone());
+        }
+    }
+    for a in &state.alliances {
+        if a.member_ids.iter().any(|m| m == acting_player_id) {
+            for m in &a.member_ids {
+                if !ids.iter().any(|x| x == m) {
+                    ids.push(m.clone());
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// 4方向で隣接するマス同士か
+pub(crate) fn territories_are_adjacent(a_id: &str, b_id: &str) -> bool {
+    let (ac, ar) = match parse_territory_id(a_id) {
+        Some(p) => p,
+        None => return false,
+    };
+    let (bc, br) = match parse_territory_id(b_id) {
+        Some(p) => p,
+        None => return false,
+    };
+    let dc = (ac as i16 - bc as i16).abs();
+    let dr = (ar as i16 - br as i16).abs();
+    dc + dr == 1
+}
+
+/// 攻撃可能な目標か。**攻撃側陣営が所有する領地**（本拠・占領地・前線基地を問わない）のいずれかに 4 方向で隣接していること。
+/// （`from` が隣接かは別途 `territories_are_adjacent` で検証。クライアント `isAttackable` と一致させる。）
+pub(crate) fn is_attackable_target(
+    territories: &[Territory],
+    target_id: &str,
+    base_owner_ids: &[String],
+) -> bool {
     let (col, row) = match parse_territory_id(target_id) {
         Some(p) => p,
         None => return false,
     };
     let col = col as i16;
     let row = row as i16;
-    let player_positions: std::collections::HashSet<(u8, u8)> = territories
+    let owned_positions: std::collections::HashSet<(u8, u8)> = territories
         .iter()
-        .filter(|t| t.owner_id.as_deref() == Some("player"))
+        .filter(|t| {
+            t.owner_id
+                .as_ref()
+                .map(|o| base_owner_ids.iter().any(|id| id == o))
+                .unwrap_or(false)
+        })
         .filter_map(|t| parse_territory_id(&t.id))
         .collect();
     let neighbors = [
@@ -476,11 +883,60 @@ pub(crate) fn is_attackable_target(territories: &[Territory], target_id: &str) -
             continue;
         }
         let (cu, ru) = (c as u8, r as u8);
-        if (cu == HOME_COL && ru == HOME_ROW) || player_positions.contains(&(cu, ru)) {
+        if owned_positions.contains(&(cu, ru)) {
             return true;
         }
     }
     false
+}
+
+/// 領地レベルから資源生産量を算出（KC準拠: 高レベル領地ほど多く生産）
+fn resource_rate_for_level(level: u8) -> (u64, u64, u64, u64) {
+    match level {
+        1 => (10, 10, 5, 3),
+        2 => (15, 15, 8, 5),
+        3 => (20, 20, 12, 8),
+        4 => (25, 25, 18, 12),
+        5 => (30, 30, 25, 18),
+        _ => (35, 35, 30, 20),
+    }
+}
+
+/// 時間ベース資源生産: 占領した領地の数・レベルに応じて資源が増加
+pub fn tick_resources(state: &mut GameState) {
+    let now = default_now_ms();
+
+    let player_territories: Vec<u8> = state.territories.iter()
+        .filter(|t| t.owner_id.as_deref() == Some(DEFAULT_PLAYER_ID))
+        .map(|t| t.level)
+        .collect();
+
+    if let Some(player) = state.players.get_mut(DEFAULT_PLAYER_ID) {
+        let elapsed_ms = now.saturating_sub(player.last_resource_tick);
+        if elapsed_ms < 60_000 { return; }
+
+        let minutes = elapsed_ms / 60_000;
+        let (mut food_rate, mut wood_rate, mut stone_rate, mut iron_rate) = (5u64, 5u64, 3u64, 2u64);
+        for &level in &player_territories {
+            let (f, w, s, i) = resource_rate_for_level(level);
+            food_rate += f;
+            wood_rate += w;
+            stone_rate += s;
+            iron_rate += i;
+        }
+
+        let bonuses = crate::facilities::calculate_facility_bonuses(&player.facilities);
+        let res_cap = 10_000u64.saturating_add(bonuses.storage_capacity as u64 * 150);
+
+        player.resources.food = (player.resources.food + food_rate * minutes).min(res_cap);
+        player.resources.wood = (player.resources.wood + wood_rate * minutes).min(res_cap);
+        player.resources.stone = (player.resources.stone + stone_rate * minutes).min(res_cap);
+        player.resources.iron = (player.resources.iron + iron_rate * minutes).min(res_cap);
+        player.last_resource_tick = now;
+
+        state.inventory = player.inventory.clone();
+        state.resources = player.resources.clone();
+    }
 }
 
 /// 純粋関数: 行動を適用した新状態を返す。戦闘はすべてここで処理し、ログに記録する。
@@ -504,4 +960,35 @@ pub fn spawn_random_ruin(state: &mut GameState) -> bool {
 /// 現在の遺跡数をカウント
 pub fn count_ruins(state: &GameState) -> usize {
     crate::model_ruins::count_ruins(state)
+}
+
+/// シーズン終了チェック: 期間を過ぎたらマップ・領地をリセットして新シーズン開始
+pub fn check_season_end(state: &mut GameState) -> bool {
+    let now = default_now_ms();
+    let elapsed = now.saturating_sub(state.season.started_at);
+    if elapsed < state.season.duration_ms {
+        return false;
+    }
+
+    let old_season = state.season.season_number;
+    state.season = SeasonInfo {
+        season_number: old_season + 1,
+        started_at: now,
+        duration_ms: state.season.duration_ms,
+    };
+
+    state.territories = default_territories();
+
+    for player in state.players.values_mut() {
+        player.resources = Resources::default();
+        player.explorations.clear();
+    }
+
+    state.alliances.clear();
+
+    push_log(&mut state.log, format!(
+        "シーズン{}が終了しました！シーズン{}が開始されます。",
+        old_season, old_season + 1
+    ));
+    true
 }

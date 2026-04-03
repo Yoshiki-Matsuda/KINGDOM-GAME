@@ -354,6 +354,35 @@ fn add_to_drops(drops: &mut Vec<InventoryItem>, item_id: &str, count: u32) {
     }
 }
 
+/// アイテムIDから表示名を返す
+pub fn item_name(item_id: &str) -> &'static str {
+    match item_id {
+        ANCIENT_STONE => "古代の石",
+        RUSTY_GEAR => "錆びた歯車",
+        ROTTEN_WOOD => "朽ちた木材",
+        BROKEN_BRICK => "壊れた煉瓦",
+        MYSTIC_CRYSTAL => "神秘の水晶",
+        MAGIC_SHARD => "魔力の欠片",
+        REFINED_IRON => "精錬鉄",
+        REINFORCED_FIBER => "強化繊維",
+        ANCIENT_BLUEPRINT => "古代の設計図",
+        SHINING_MAGICSTONE => "輝く魔石",
+        GOLDEN_GEAR => "黄金の歯車",
+        GUARDIAN_CORE => "守護者のコア",
+        ANCIENT_KINGS_SEAL => "古代王の印章",
+        DRAGON_SCALE => "竜鱗",
+        SKILL_BOOK_ATTACK => "攻撃スキルの書",
+        SKILL_BOOK_DEFENSE => "防御スキルの書",
+        SKILL_BOOK_SUPPORT => "補助スキルの書",
+        EXP_CRYSTAL => "経験値結晶",
+        SUMMON_SHARD => "召喚の欠片",
+        GOLD => "ゴールド",
+        CARD_PACK_TICKET => "カードパック券",
+        RARE_PACK_TICKET => "レアパック券",
+        _ => "不明なアイテム",
+    }
+}
+
 /// インベントリにアイテムを追加
 pub fn add_items_to_inventory(inventory: &mut Vec<InventoryItem>, items: Vec<InventoryItem>) {
     for item in items {

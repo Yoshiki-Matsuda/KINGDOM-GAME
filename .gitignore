@@ -27,6 +27,9 @@ dist-ssr
 # Rust
 /target
 server/target
+server/target-local
+server/target_run
+server/target_build_alt
 Cargo.lock
 
 # サーバー永続化（ワイプ時以外は復元用。本番では別管理）

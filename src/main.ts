@@ -18,6 +18,11 @@ const render = createAppRenderer({
   mapContainer: elements.mapContainer,
   logEl: elements.logEl,
   inventoryEl: elements.inventoryEl,
+  marketEl: elements.marketEl,
+  allianceEl: elements.allianceEl,
+  packEl: elements.packEl,
+  statusEl: elements.statusEl,
+  rankingEl: elements.rankingEl,
 });
 
 setRenderCallback(render);

@@ -33,11 +33,13 @@ function sendTraveledAction(t: TravelingUnit): TravelingUnit | null {
             t.fromId,
             t.targetId,
             t.count,
-            t.energyPerBody,
+            t.monstersPerBody,
             t.bodyNames,
             t.unitName,
             t.speedPerBody,
-            t.skillsPerBody
+            t.skillsPerBody,
+            t.statsPerBody,
+            t.ownedCardIndices
         )));
         setAttackSourceId(null);
         const returnDurationMs = t.arrivalTime - t.departureTime;
@@ -49,16 +51,17 @@ function sendTraveledAction(t: TravelingUnit): TravelingUnit | null {
             actionType: "return",
             targetId: "",
             count: 0,
-            energyPerBody: [],
+            monstersPerBody: [],
             speedPerBody: [],
             bodyNames: [],
             skillsPerBody: [],
+            statsPerBody: [],
             departureTime: now,
             arrivalTime: now + returnDurationMs,
         };
     }
     if (t.actionType === "deploy") {
-        ws.send(JSON.stringify(deployAction(t.targetId, t.count, t.energyPerBody, t.bodyNames)));
+        ws.send(JSON.stringify(deployAction(t.targetId, t.count, t.monstersPerBody, t.bodyNames)));
         setFormedUnitsList(formedUnitsList.filter((u) => u.id !== t.unitId));
     }
     return null;

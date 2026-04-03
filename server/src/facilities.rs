@@ -3,14 +3,21 @@
 /// 施設ボーナス集計結果
 #[derive(Debug, Clone, Default)]
 pub struct FacilityBonuses {
-    pub energy_bonus: u32,
-    pub energy_percent: u32,
+    pub monster_bonus: u32,
+    pub monster_percent: u32,
     pub speed_bonus: u32,
     pub skill_power: u32,
     pub drop_rate: u32,
     pub exp_bonus: u32,
     pub storage_capacity: u32,
     pub unit_capacity: u32,
+    pub market_fee_reduction: u32,
+    pub defense_bonus: u32,
+    pub attack_bonus: u32,
+    /// 研究所系: ユニット編成コスト上限の加算（KC）
+    pub unit_cost_cap_bonus: f32,
+    /// 兵舎系: ターン終了時のスタミナ追加回復量
+    pub stamina_recovery_bonus: u32,
 }
 
 use crate::model::BuiltFacility;
@@ -32,34 +39,38 @@ pub fn calculate_facility_bonuses(facilities: &[BuiltFacility]) -> FacilityBonus
         }
         
         match facility.facility_id.as_str() {
-            "energy_well" => {
+            "monster_well" | "monster_barracks" => {
                 let values = [5, 10, 18, 28, 40];
                 if let Some(&v) = values.get(facility.level as usize - 1) {
-                    bonuses.energy_bonus += v;
+                    bonuses.monster_bonus += v;
                 }
             }
-            "training_ground" => {
+            "training_ground" | "training_tower" => {
                 let values = [10, 20, 35, 50, 70];
                 if let Some(&v) = values.get(facility.level as usize - 1) {
-                    bonuses.energy_percent += v;
+                    bonuses.monster_percent += v;
                 }
             }
-            "armory" => {
+            "armory" | "hero_statue" => {
                 let values = [2, 4, 7];
                 if let Some(&v) = values.get(facility.level as usize - 1) {
                     bonuses.speed_bonus += v;
                 }
             }
-            "magic_tower" => {
+            "magic_tower" | "battle_lab" => {
                 let values = [10, 25, 45, 70];
                 if let Some(&v) = values.get(facility.level as usize - 1) {
                     bonuses.skill_power += v;
                 }
             }
-            "research_lab" => {
+            "research_lab" | "library" => {
                 let values = [20, 50, 100];
                 if let Some(&v) = values.get(facility.level as usize - 1) {
                     bonuses.exp_bonus += v;
+                }
+                let cap_bumps = [0.15_f32, 0.35, 0.6];
+                if let Some(&v) = cap_bumps.get(facility.level as usize - 1) {
+                    bonuses.unit_cost_cap_bonus += v;
                 }
             }
             "watchtower" => {
@@ -68,7 +79,7 @@ pub fn calculate_facility_bonuses(facilities: &[BuiltFacility]) -> FacilityBonus
                     bonuses.drop_rate += v;
                 }
             }
-            "altar" => {
+            "altar" | "guardian_shrine" => {
                 let values = [15, 35, 60];
                 if let Some(&v) = values.get(facility.level as usize - 1) {
                     bonuses.drop_rate += v;
@@ -80,10 +91,32 @@ pub fn calculate_facility_bonuses(facilities: &[BuiltFacility]) -> FacilityBonus
                     bonuses.storage_capacity += v;
                 }
             }
-            "barracks" => {
+            "barracks" | "stronghold" => {
                 let values = [1, 2, 3];
                 if let Some(&v) = values.get(facility.level as usize - 1) {
                     bonuses.unit_capacity += v;
+                }
+                let stam = [2_u32, 4, 6];
+                if let Some(&v) = stam.get(facility.level as usize - 1) {
+                    bonuses.stamina_recovery_bonus += v;
+                }
+            }
+            "trading_post" => {
+                let values = [2, 4, 6, 8, 10];
+                if let Some(&v) = values.get(facility.level as usize - 1) {
+                    bonuses.market_fee_reduction += v;
+                }
+            }
+            "fortress" => {
+                let values = [5, 10, 15, 20, 30];
+                if let Some(&v) = values.get(facility.level as usize - 1) {
+                    bonuses.defense_bonus += v;
+                }
+            }
+            "war_god_shrine" => {
+                let values = [5, 10, 20];
+                if let Some(&v) = values.get(facility.level as usize - 1) {
+                    bonuses.attack_bonus += v;
                 }
             }
             _ => {}
@@ -93,9 +126,9 @@ pub fn calculate_facility_bonuses(facilities: &[BuiltFacility]) -> FacilityBonus
     bonuses
 }
 
-/// 施設ボーナスを適用したエナジーを計算
-pub fn apply_energy_bonus(base_energy: u32, bonuses: &FacilityBonuses) -> u32 {
-    let with_bonus = base_energy + bonuses.energy_bonus;
-    let with_percent = with_bonus as f64 * (1.0 + bonuses.energy_percent as f64 / 100.0);
+/// 施設ボーナスを適用した魔獣数（monster count）を計算
+pub fn apply_monster_bonus(base_monster_count: u32, bonuses: &FacilityBonuses) -> u32 {
+    let with_bonus = base_monster_count + bonuses.monster_bonus;
+    let with_percent = with_bonus as f64 * (1.0 + bonuses.monster_percent as f64 / 100.0);
     with_percent as u32
 }

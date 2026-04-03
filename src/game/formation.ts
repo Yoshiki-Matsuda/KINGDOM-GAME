@@ -3,13 +3,15 @@
  */
 
 import {
-  bodyEnergies, bodySpeeds,
+  bodyMonsterCounts, bodySpeeds,
   formedUnitsList, setFormedUnitsList,
   getNextFormedUnitId,
-  setBodyEnergies, setBodySpeeds,
+  setBodyMonsterCounts, setBodySpeeds,
   gameState,
 } from "../store";
-import { BODIES_PER_UNIT, DEFAULT_BODY_ENERGY, DEFAULT_BODY_SPEED } from "./characters";
+import { getPlayerOwnedCards } from "../shared/game-state";
+import { BODIES_PER_UNIT, DEFAULT_BODY_MONSTER_COUNT, DEFAULT_BODY_SPEED, getCharacterStats } from "./characters";
+import { getEffectiveUnitCostCap } from "./facility-selectors";
 import { HOME_TERRITORY_ID } from "../map-view";
 
 /** 本拠地の体数を取得 */
@@ -19,16 +21,16 @@ export function getHomeTroops(): number {
 }
 
 /**
- * 本拠地の体数が変わったら bodyEnergies/bodySpeeds を伸縮し、
+ * 本拠地の体数が変わったら bodyMonsterCounts/bodySpeeds を伸縮し、
  * 編成済みユニットを検証する
  */
 export function validateFormedUnits(): void {
   const homeTroops = getHomeTroops();
-  const energies = [...bodyEnergies];
-  while (energies.length < homeTroops) {
-    energies.push(DEFAULT_BODY_ENERGY);
+  const counts = [...bodyMonsterCounts];
+  while (counts.length < homeTroops) {
+    counts.push(DEFAULT_BODY_MONSTER_COUNT);
   }
-  setBodyEnergies(energies.slice(0, homeTroops));
+  setBodyMonsterCounts(counts.slice(0, homeTroops));
 
   const speeds = [...bodySpeeds];
   while (speeds.length < homeTroops) {
@@ -51,35 +53,67 @@ export function validateFormedUnits(): void {
   setFormedUnitsList(units);
 }
 
-/** ユニットのenergy/avgSpeedをindicesから再計算（-1はスキップ） */
+/** ユニットの魔獣数合計/avgSpeedをindicesから再計算（-1はスキップ） */
 export function recalcUnitStats(
   indices: [number, number, number],
-  energies: number[],
+  monsterCounts: number[],
   speeds: number[]
-): { energy: number; avgSpeed: number } {
+): { monster_count: number; avgSpeed: number } {
   const valid = indices.filter((i) => i >= 0);
-  if (valid.length === 0) return { energy: 0, avgSpeed: 0 };
-  const energy = valid.reduce((s, i) => s + (energies[i] ?? DEFAULT_BODY_ENERGY), 0);
+  if (valid.length === 0) return { monster_count: 0, avgSpeed: 0 };
+  const monster_count = valid.reduce((s, i) => s + (monsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT), 0);
   const avgSpeed = valid.reduce((s, i) => s + (speeds[i] ?? DEFAULT_BODY_SPEED), 0) / valid.length;
-  return { energy, avgSpeed };
+  return { monster_count, avgSpeed };
 }
 
-/** 開発用: 編成が0のとき1ユニット（キャラ0,1,2）を自動追加 */
+/** 所持カードIDが本拠体インデックスに収まるものを優先し、足りなければ 0..から埋める */
+function pickDefaultIndicesForOwned(): [number, number, number] | null {
+  const troops = getHomeTroops();
+  if (troops < BODIES_PER_UNIT) return null;
+  const owned = getPlayerOwnedCards(gameState);
+  const picks: number[] = [];
+  const seen = new Set<number>();
+  for (const cardId of owned) {
+    if (cardId >= 0 && cardId < troops && !seen.has(cardId)) {
+      seen.add(cardId);
+      picks.push(cardId);
+      if (picks.length >= 3) break;
+    }
+  }
+  for (let b = 0; b < troops && picks.length < 3; b++) {
+    if (!seen.has(b)) {
+      seen.add(b);
+      picks.push(b);
+    }
+  }
+  if (picks.length < 3) return null;
+  return [picks[0], picks[1], picks[2]];
+}
+
+/** 開発用: 編成が0のとき1ユニットを自動追加（所持と体インデックスのずれを抑える） */
 export function ensureDevUnit(): void {
   validateFormedUnits();
-  if (formedUnitsList.length === 0 && getHomeTroops() >= BODIES_PER_UNIT) {
-    const e0 = bodyEnergies[0] ?? DEFAULT_BODY_ENERGY;
-    const e1 = bodyEnergies[1] ?? DEFAULT_BODY_ENERGY;
-    const e2 = bodyEnergies[2] ?? DEFAULT_BODY_ENERGY;
-    const s0 = bodySpeeds[0] ?? DEFAULT_BODY_SPEED;
-    const s1 = bodySpeeds[1] ?? DEFAULT_BODY_SPEED;
-    const s2 = bodySpeeds[2] ?? DEFAULT_BODY_SPEED;
-    setFormedUnitsList([{
-      id: `unit-${getNextFormedUnitId()}`,
-      name: "ユニット1",
-      indices: [0, 1, 2],
-      energy: e0 + e1 + e2,
-      avgSpeed: (s0 + s1 + s2) / 3,
-    }]);
-  }
+  if (formedUnitsList.length !== 0 || getHomeTroops() < BODIES_PER_UNIT) return;
+
+  const tri = pickDefaultIndicesForOwned();
+  if (!tri) return;
+
+  const cap = getEffectiveUnitCostCap(gameState);
+  const devCost = tri.reduce((s, i) => s + getCharacterStats(i).cost, 0);
+  if (devCost > cap + 0.0001) return;
+
+  const [i0, i1, i2] = tri;
+  const e0 = bodyMonsterCounts[i0] ?? DEFAULT_BODY_MONSTER_COUNT;
+  const e1 = bodyMonsterCounts[i1] ?? DEFAULT_BODY_MONSTER_COUNT;
+  const e2 = bodyMonsterCounts[i2] ?? DEFAULT_BODY_MONSTER_COUNT;
+  const s0 = bodySpeeds[i0] ?? DEFAULT_BODY_SPEED;
+  const s1 = bodySpeeds[i1] ?? DEFAULT_BODY_SPEED;
+  const s2 = bodySpeeds[i2] ?? DEFAULT_BODY_SPEED;
+  setFormedUnitsList([{
+    id: `unit-${getNextFormedUnitId()}`,
+    name: "ユニット1",
+    indices: tri,
+    monster_count: e0 + e1 + e2,
+    avgSpeed: (s0 + s1 + s2) / 3,
+  }]);
 }

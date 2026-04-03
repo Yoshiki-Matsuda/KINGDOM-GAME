@@ -25,8 +25,8 @@ export function renderHud(): void {
   const bonuses = getFacilityBonusesForState(gameState);
 
   const bonusTexts: string[] = [];
-  if (bonuses.energyBonus > 0) bonusTexts.push(`EN+${bonuses.energyBonus}`);
-  if (bonuses.energyPercent > 0) bonusTexts.push(`EN+${bonuses.energyPercent}%`);
+  if (bonuses.monsterBonus > 0) bonusTexts.push(`M+${bonuses.monsterBonus}`);
+  if (bonuses.monsterPercent > 0) bonusTexts.push(`M+${bonuses.monsterPercent}%`);
   if (bonuses.speedBonus > 0) bonusTexts.push(`SPD+${bonuses.speedBonus}`);
   if (bonuses.dropRate > 0) bonusTexts.push(`DROP+${bonuses.dropRate}%`);
 
@@ -34,8 +34,14 @@ export function renderHud(): void {
     ? `<span class="hud-bonus">${bonusTexts.join(" ")}</span>` 
     : "";
 
+  const res = gameState.resources;
+  const resDisplay = res
+    ? `<span class="hud-resources">🌾${res.food} 🪵${res.wood} 🪨${res.stone} ⛏${res.iron}</span>`
+    : "";
+
   hudEl.innerHTML = `
     <span class="hud-status" data-status="${USE_MOCK_STATE ? "mock" : connectionStatus}">${statusText}</span>
+    ${resDisplay}
     ${bonusDisplay}
   `;
 }
