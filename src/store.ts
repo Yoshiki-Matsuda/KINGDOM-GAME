@@ -28,9 +28,9 @@ export interface FormedUnit {
   id: string;
   name: string;
   indices: [number, number, number];
-  /** 3体のキャラカードの魔獣数の合計 */
+  /** 編成3体の魔獣数の合計 */
   monster_count: number;
-  /** 3体のキャラカードSPEEDの平均 */
+  /** 編成3体のSPEEDの平均 */
   avgSpeed: number;
 }
 export let formedUnitsList: FormedUnit[] = [];

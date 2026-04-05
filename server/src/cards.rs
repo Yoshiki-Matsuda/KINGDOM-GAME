@@ -1,9 +1,9 @@
-//! カード定義（プレイヤー・敵共通）
+//! 魔獣マスタ定義（プレイヤー・敵共通。型名は後方互換のため Card を維持）
 
 use serde::{Deserialize, Serialize};
 use crate::skills::SkillData;
 
-/// カードのレアリティ
+/// 魔獣のレアリティ
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CardRarity {
@@ -27,7 +27,7 @@ pub enum Race {
     Undead,
 }
 
-/// カードのステータス
+/// 魔獣のステータス
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CardStats {
     pub monster_count: u32,
@@ -70,7 +70,7 @@ impl Default for CardStats {
     }
 }
 
-/// カード定義
+/// 魔獣マスタ1件
 #[derive(Debug, Clone)]
 pub struct CardDef {
     pub id: u32,
@@ -81,9 +81,9 @@ pub struct CardDef {
     pub default_skills: Option<SkillData>,
 }
 
-/// 全カード定義
+/// 全魔獣マスタ
 pub const CARDS: &[CardDef] = &[
-    // === プレイヤー初期カード（KC 7種族） ===
+    // === プレイヤー初期魔獣（KC 7種族） ===
     CardDef { id: 0, name: "ダイアウルフ", rarity: CardRarity::Rare, race: Race::Beast, stats: CardStats { monster_count: 15, speed: 6, attack: 9, intelligence: 3, defense: 4, magic_defense: 3, range: 1, cost: 1.5, occupation_power: 100 }, default_skills: None },
     CardDef { id: 1, name: "ゴブリンウォリアー", rarity: CardRarity::Rare, race: Race::Demihuman, stats: CardStats { monster_count: 18, speed: 5, attack: 7, intelligence: 4, defense: 6, magic_defense: 3, range: 1, cost: 1.5, occupation_power: 100 }, default_skills: None },
     CardDef { id: 2, name: "インプ", rarity: CardRarity::Rare, race: Race::Demon, stats: CardStats { monster_count: 10, speed: 7, attack: 4, intelligence: 10, defense: 2, magic_defense: 6, range: 2, cost: 1.5, occupation_power: 100 }, default_skills: None },
@@ -128,7 +128,7 @@ pub const CARDS: &[CardDef] = &[
     CardDef { id: 43, name: "タイタン", rarity: CardRarity::Legendary, race: Race::Giant, stats: CardStats { monster_count: 35, speed: 2, attack: 22, intelligence: 12, defense: 25, magic_defense: 18, range: 1, cost: 1.5, occupation_power: 100 }, default_skills: None },
 
     // =====================================================
-    // === 収集可能カード（KC wiki 準拠で追加） ===
+    // === 収集可能魔獣（KC wiki 準拠で追加） ===
     // =====================================================
 
     // --- 獣族 (Beast) ---
@@ -183,7 +183,7 @@ pub const CARDS: &[CardDef] = &[
     CardDef { id: 114, name: "エルダーリッチ", rarity: CardRarity::Epic, race: Race::Undead, stats: CardStats { monster_count: 16, speed: 4, attack: 8, intelligence: 18, defense: 8, magic_defense: 16, range: 3, cost: 1.0, occupation_power: 90 }, default_skills: None },
 ];
 
-/// カードIDからカード定義を取得
+/// 魔獣ID（card_id）から定義を取得
 pub fn get_card(id: u32) -> Option<&'static CardDef> {
     CARDS.iter().find(|c| c.id == id)
 }
@@ -210,13 +210,13 @@ fn normalize_card_name(name: &str) -> &str {
     }
 }
 
-/// カード名からカード定義を取得
+/// 魔獣名から定義を取得
 pub fn get_card_by_name(name: &str) -> Option<&'static CardDef> {
     let normalized = normalize_card_name(name);
     CARDS.iter().find(|c| c.name == normalized)
 }
 
-/// カード名からカードIDを取得
+/// 魔獣名からID（card_id）を取得
 pub fn get_card_id_by_name(name: &str) -> Option<u32> {
     get_card_by_name(name).map(|c| c.id)
 }
@@ -262,7 +262,7 @@ fn fallback_npc_skill_data(c: &CardDef) -> SkillData {
     }
 }
 
-/// カードIDに対応するデフォルトスキルを取得
+/// 魔獣IDに対応するデフォルトスキルを取得
 pub fn get_card_skills(card_id: u32) -> SkillData {
     match get_card(card_id) {
         Some(c) if c.default_skills.is_some() => c.default_skills.clone().unwrap(),

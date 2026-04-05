@@ -9,10 +9,37 @@ import {
   setBodyMonsterCounts, setBodySpeeds,
   gameState,
 } from "../store";
-import { getPlayerOwnedCards } from "../shared/game-state";
+import {
+  getPlayerCardMonsterCounts,
+  getPlayerOwnedCards,
+  MAX_MONSTER_COUNT_PER_CARD_SLOT,
+  MIN_MONSTER_COUNT_PER_CARD_SLOT,
+} from "../shared/game-state";
 import { BODIES_PER_UNIT, DEFAULT_BODY_MONSTER_COUNT, DEFAULT_BODY_SPEED, getCharacterStats } from "./characters";
 import { getEffectiveUnitCostCap } from "./facility-selectors";
 import { HOME_TERRITORY_ID } from "../map-view";
+
+/** KC: 編成3枠のうちリーダーはインデックス2（前0・中1・リーダー2） */
+export const KC_LEADER_FORMATION_SLOT_INDEX = 2;
+
+/** リーダー枠が埋まっていれば出撃・援軍の対象にできる */
+export function isKcUnitReadyToDeploy(indices: [number, number, number]): boolean {
+  return indices[KC_LEADER_FORMATION_SLOT_INDEX] >= 0;
+}
+
+export function countFilledFormationBodies(indices: [number, number, number]): number {
+  return indices.filter((i) => i >= 0).length;
+}
+
+/** 前衛→中衛→リーダーの順で、埋まっている体の本拠スロットだけを配列化 */
+export function formationBodyIndicesInSlotOrder(indices: [number, number, number]): number[] {
+  const out: number[] = [];
+  for (let s = 0; s < 3; s++) {
+    const bi = indices[s];
+    if (bi >= 0) out.push(bi);
+  }
+  return out;
+}
 
 /** 本拠地の体数を取得 */
 export function getHomeTroops(): number {
@@ -26,30 +53,44 @@ export function getHomeTroops(): number {
  */
 export function validateFormedUnits(): void {
   const homeTroops = getHomeTroops();
-  const counts = [...bodyMonsterCounts];
+  const serverCounts = getPlayerCardMonsterCounts(gameState);
+  let counts =
+    serverCounts.length >= homeTroops
+      ? [...serverCounts]
+      : [...serverCounts, ...Array(homeTroops - serverCounts.length).fill(DEFAULT_BODY_MONSTER_COUNT)];
   while (counts.length < homeTroops) {
     counts.push(DEFAULT_BODY_MONSTER_COUNT);
   }
-  setBodyMonsterCounts(counts.slice(0, homeTroops));
+  counts = counts
+    .slice(0, homeTroops)
+    .map((c) =>
+      Math.max(MIN_MONSTER_COUNT_PER_CARD_SLOT, Math.min(MAX_MONSTER_COUNT_PER_CARD_SLOT, c)),
+    );
+  setBodyMonsterCounts(counts);
 
   const speeds = [...bodySpeeds];
   while (speeds.length < homeTroops) {
     speeds.push(Math.floor(Math.random() * 5) + 3);
   }
-  setBodySpeeds(speeds.slice(0, homeTroops));
+  const spd = speeds.slice(0, homeTroops);
+  setBodySpeeds(spd);
 
   // 有効なユニット: 各indexが-1（空き）または 0..homeTroops-1
   let units = formedUnitsList.filter((u) =>
     u.indices.every((i) => i === -1 || (i >= 0 && i < homeTroops))
   );
-  const completeUnits = units.filter((u) => u.indices.every((i) => i >= 0));
-  const incompleteUnits = units.filter((u) => u.indices.some((i) => i < 0));
-  // 完成ユニットが多すぎる場合のみ削除（未完成は編集用に残す）
-  let toKeep = completeUnits;
-  while (toKeep.length * BODIES_PER_UNIT > homeTroops && toKeep.length > 0) {
+  const deployableUnits = units.filter((u) => isKcUnitReadyToDeploy(u.indices));
+  const nonDeployableUnits = units.filter((u) => !isKcUnitReadyToDeploy(u.indices));
+  // 出撃可能ユニットが本拠体数を超える場合は末尾から削る（未完成は編集用に残す）
+  let toKeep = deployableUnits;
+  const bodiesUsed = (u: (typeof units)[number]) => countFilledFormationBodies(u.indices);
+  while (toKeep.reduce((s, u) => s + bodiesUsed(u), 0) > homeTroops && toKeep.length > 0) {
     toKeep = toKeep.slice(0, -1);
   }
-  units = [...toKeep, ...incompleteUnits];
+  units = [...toKeep, ...nonDeployableUnits].map((u) => ({
+    ...u,
+    ...recalcUnitStats(u.indices, counts, spd),
+  }));
   setFormedUnitsList(units);
 }
 
@@ -61,23 +102,30 @@ export function recalcUnitStats(
 ): { monster_count: number; avgSpeed: number } {
   const valid = indices.filter((i) => i >= 0);
   if (valid.length === 0) return { monster_count: 0, avgSpeed: 0 };
-  const monster_count = valid.reduce((s, i) => s + (monsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT), 0);
+  const mcSlot = (i: number) =>
+    Math.max(
+      MIN_MONSTER_COUNT_PER_CARD_SLOT,
+      Math.min(
+        MAX_MONSTER_COUNT_PER_CARD_SLOT,
+        monsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT,
+      ),
+    );
+  const monster_count = valid.reduce((s, i) => s + mcSlot(i), 0);
   const avgSpeed = valid.reduce((s, i) => s + (speeds[i] ?? DEFAULT_BODY_SPEED), 0) / valid.length;
   return { monster_count, avgSpeed };
 }
 
-/** 所持カードIDが本拠体インデックスに収まるものを優先し、足りなければ 0..から埋める */
+/** 所持魔獣IDが本拠体インデックスに収まるものを優先し、足りなければ 0..から埋める */
 function pickDefaultIndicesForOwned(): [number, number, number] | null {
   const troops = getHomeTroops();
   if (troops < BODIES_PER_UNIT) return null;
   const owned = getPlayerOwnedCards(gameState);
   const picks: number[] = [];
   const seen = new Set<number>();
-  for (const cardId of owned) {
-    if (cardId >= 0 && cardId < troops && !seen.has(cardId)) {
-      seen.add(cardId);
-      picks.push(cardId);
-      if (picks.length >= 3) break;
+  for (let slot = 0; slot < owned.length && slot < troops && picks.length < 3; slot++) {
+    if (!seen.has(slot)) {
+      seen.add(slot);
+      picks.push(slot);
     }
   }
   for (let b = 0; b < troops && picks.length < 3; b++) {
@@ -99,21 +147,16 @@ export function ensureDevUnit(): void {
   if (!tri) return;
 
   const cap = getEffectiveUnitCostCap(gameState);
-  const devCost = tri.reduce((s, i) => s + getCharacterStats(i).cost, 0);
+  const owned = getPlayerOwnedCards(gameState);
+  const devCost = tri.reduce((s, i) => s + getCharacterStats(owned[i] ?? 0).cost, 0);
   if (devCost > cap + 0.0001) return;
 
-  const [i0, i1, i2] = tri;
-  const e0 = bodyMonsterCounts[i0] ?? DEFAULT_BODY_MONSTER_COUNT;
-  const e1 = bodyMonsterCounts[i1] ?? DEFAULT_BODY_MONSTER_COUNT;
-  const e2 = bodyMonsterCounts[i2] ?? DEFAULT_BODY_MONSTER_COUNT;
-  const s0 = bodySpeeds[i0] ?? DEFAULT_BODY_SPEED;
-  const s1 = bodySpeeds[i1] ?? DEFAULT_BODY_SPEED;
-  const s2 = bodySpeeds[i2] ?? DEFAULT_BODY_SPEED;
+  const { monster_count, avgSpeed } = recalcUnitStats(tri, bodyMonsterCounts, bodySpeeds);
   setFormedUnitsList([{
     id: `unit-${getNextFormedUnitId()}`,
     name: "ユニット1",
     indices: tri,
-    monster_count: e0 + e1 + e2,
-    avgSpeed: (s0 + s1 + s2) / 3,
+    monster_count,
+    avgSpeed,
   }]);
 }

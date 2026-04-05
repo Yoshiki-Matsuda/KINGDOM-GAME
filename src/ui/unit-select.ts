@@ -14,7 +14,12 @@ import {
   getNextTravelingId,
 } from "../store";
 import type { TravelingUnit } from "../store";
-import { BODIES_PER_UNIT, DEFAULT_BODY_MONSTER_COUNT, DEFAULT_BODY_SPEED, getBodyDisplayName, getCharacterSkillData, getCharacterStats } from "../game/characters";
+import { DEFAULT_BODY_MONSTER_COUNT, DEFAULT_BODY_SPEED, getBodyDisplayName, getCharacterSkillData, getCharacterStats } from "../game/characters";
+import {
+  formationBodyIndicesInSlotOrder,
+  isKcUnitReadyToDeploy,
+  recalcUnitStats,
+} from "../game/formation";
 import { gameState } from "../store";
 import { getPlayerOwnedCards } from "../shared/game-state";
 import { getDistanceFromHome, getTravelTimeMs, startTravelIntervalIfNeeded } from "../game/travel";
@@ -49,7 +54,7 @@ export function createUnitSelectElement(): HTMLDivElement {
         </div>
       </div>
       <div class="unit-select-panel-empty" data-unit-panel-empty style="display:none">
-        <p class="unit-select-empty-msg">編成されたユニットがありません。編成画面でキャラ3体を選んでユニットを編成してください。</p>
+        <p class="unit-select-empty-msg">編成されたユニットがありません。編成画面でリーダー枠にキャラを置いてユニットを編成してください。</p>
         <div class="unit-select-returning unit-select-returning--empty" data-unit-returning-empty style="display:none">
           <div class="unit-select-returning-title">帰還中</div>
           <div class="unit-select-returning-list" data-unit-returning-list-empty></div>
@@ -88,7 +93,7 @@ export function showUnitSelect(pending: PendingUnitAction): void {
     emptyMsg.textContent =
       completeUnits.length > 0
         ? "選択できるユニットがありません。出撃中・帰還中のユニットは到着までお待ちください。"
-        : "編成されたユニットがありません。編成画面でキャラ3体を選んでユニットを編成してください。";
+        : "編成されたユニットがありません。編成画面でリーダー枠にキャラを置いてユニットを編成してください。";
     const returningEmpty = unitSelectEl.querySelector("[data-unit-returning-empty]") as HTMLElement;
     const listEmpty = unitSelectEl.querySelector("[data-unit-returning-list-empty]")!;
     if (returningUnits.length > 0) {
@@ -116,45 +121,13 @@ export function showUnitSelect(pending: PendingUnitAction): void {
   bindUnitSelectEscape();
 }
 
-/**
- * 編成スロットの体インデックス（≒そのマスのキャラ定義ID）に対応する `owned_cards` 配列上のインデックス。
- * 完全一致が無い（例: 編成0,1,2なのに所持がゴブリンだけ）でも、負担分散で割り当てて攻撃可能にする。
- */
-function resolveOwnedCardIndices(bodyIndices: [number, number, number], owned: number[]): number[] | null {
+/** 体スロット番号は `owned_cards` の添字と同一（サーバー・編成の前提） */
+function resolveOwnedCardIndices(bodyIndices: number[], owned: number[]): number[] | null {
   if (owned.length === 0) return null;
-
-  const usage = new Map<number, number>();
-  const out: number[] = [];
-
-  for (let slot = 0; slot < 3; slot++) {
-    const bi = bodyIndices[slot];
-    let bestJ = -1;
-    let bestUses = Infinity;
-
-    for (let j = 0; j < owned.length; j++) {
-      if (owned[j] !== bi) continue;
-      const u = usage.get(j) ?? 0;
-      if (u < bestUses) {
-        bestUses = u;
-        bestJ = j;
-      }
-    }
-
-    if (bestJ < 0) {
-      for (let j = 0; j < owned.length; j++) {
-        const u = usage.get(j) ?? 0;
-        if (bestJ < 0 || u < bestUses) {
-          bestUses = u;
-          bestJ = j;
-        }
-      }
-    }
-
-    usage.set(bestJ, (usage.get(bestJ) ?? 0) + 1);
-    out.push(bestJ);
+  for (const bi of bodyIndices) {
+    if (bi < 0 || bi >= owned.length) return null;
   }
-
-  return out;
+  return [...bodyIndices];
 }
 
 export function closeUnitSelect(): void {
@@ -185,7 +158,7 @@ export function updateUnitSelectReturningList(): void {
     emptyMsg.textContent =
       completeUnits.length > 0
         ? "選択できるユニットがありません。出撃中・帰還中のユニットは到着までお待ちください。"
-        : "編成されたユニットがありません。編成画面でキャラ3体を選んでユニットを編成してください。";
+        : "編成されたユニットがありません。編成画面でリーダー枠にキャラを置いてユニットを編成してください。";
     if (returningUnits.length > 0) {
       if (returningEmpty) {
         returningEmpty.style.display = "block";
@@ -219,34 +192,54 @@ function setupUnitSelect(): void {
 
   confirmBtn.addEventListener("click", () => {
     const pending = pendingUnitAction;
-    if (!pending || ws?.readyState !== WebSocket.OPEN) {
+    if (!pending) {
       closeUnitSelect();
       render();
+      return;
+    }
+    if (ws?.readyState !== WebSocket.OPEN) {
+      alert("サーバーに接続されていません。接続後にもう一度決定してください。");
       return;
     }
     const listEl = unitSelectEl.querySelector("[data-unit-list]")!;
     const checked = listEl.querySelector<HTMLInputElement>('input[name="unit-select-one"]:checked');
     const selectedId = checked?.dataset.unitId ?? null;
     if (!selectedId) {
-      closeUnitSelect();
-      render();
+      alert("送信するユニットを一覧から選んでください（ラジオボタン）。");
       return;
     }
-    const count = 1 * BODIES_PER_UNIT;
     const unit = formedUnitsList.find((u) => u.id === selectedId);
     if (!unit) {
-      closeUnitSelect();
-      render();
+      alert("選択したユニットが見つかりません。一覧を更新してからもう一度選んでください。");
       return;
     }
-    const monstersPerBody = unit.indices.map((i) => bodyMonsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT);
-    const speedPerBody = unit.indices.map((i) => bodySpeeds[i] ?? DEFAULT_BODY_SPEED);
-    const bodyNames = unit.indices.map((i) => getBodyDisplayName(i));
-    const skillsPerBody = unit.indices.map((i) => getCharacterSkillData(i));
-    const statsPerBody = unit.indices.map((i) => {
-      const s = getCharacterStats(i);
+    if (!isKcUnitReadyToDeploy(unit.indices)) {
+      alert("リーダー枠にキャラがいないユニットは出撃できません。編成画面でリーダーを配置してください。");
+      return;
+    }
+    const bodyIdxOrder = formationBodyIndicesInSlotOrder(unit.indices);
+    const count = bodyIdxOrder.length;
+    if (count === 0) {
+      alert("このユニットに出撃する体がありません。");
+      return;
+    }
+    const owned = getPlayerOwnedCards(gameState);
+    const monstersPerBody = bodyIdxOrder.map((i) => bodyMonsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT);
+    const speedPerBody = bodyIdxOrder.map((i) => bodySpeeds[i] ?? DEFAULT_BODY_SPEED);
+    const bodyNames = bodyIdxOrder.map((i) => {
+      const cid = owned[i] ?? 0;
+      return getBodyDisplayName(cid);
+    });
+    const skillsPerBody = bodyIdxOrder.map((i) => {
+      const cid = owned[i] ?? 0;
+      return getCharacterSkillData(cid);
+    });
+    const statsPerBody = bodyIdxOrder.map((i) => {
+      const cid = owned[i] ?? 0;
+      const s = getCharacterStats(cid);
+      const mc = bodyMonsterCounts[i] ?? s.monster_count;
       return {
-        monster_count: s.monster_count,
+        monster_count: mc,
         speed: s.speed,
         attack: s.attack,
         intelligence: s.intelligence,
@@ -257,17 +250,17 @@ function setupUnitSelect(): void {
         occupation_power: s.occupationPower,
       };
     });
-    const owned = getPlayerOwnedCards(gameState);
-    const ownedCardIndices = resolveOwnedCardIndices(unit.indices, owned);
+    const ownedCardIndices = resolveOwnedCardIndices(bodyIdxOrder, owned);
     if (!ownedCardIndices) {
-      console.warn("[kingdom] 所持カードが0枚のため出撃できません。", { unitIndices: unit.indices });
-      closeUnitSelect();
-      render();
+      alert(
+        "このユニットの体番号と、本拠の所持魔獣スロットが一致しません。編成の体番号をスロット内に収めるか、編成し直してください。",
+      );
       return;
     }
     const targetId = pending.type === "attack" ? pending.toId : pending.territoryId;
+    const { avgSpeed } = recalcUnitStats(unit.indices, bodyMonsterCounts, bodySpeeds);
     const distance = getDistanceFromHome(targetId);
-    const travelTimeMs = getTravelTimeMs(distance, unit.avgSpeed);
+    const travelTimeMs = getTravelTimeMs(distance, avgSpeed);
 
     const traveling: TravelingUnit = {
       id: `travel-${getNextTravelingId()}`,

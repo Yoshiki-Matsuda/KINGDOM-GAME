@@ -19,6 +19,12 @@ pub const DEFAULT_PLAYER_ID: &str = "player";
 pub const HOME_COL: u8 = 24;
 pub const HOME_ROW: u8 = 24;
 
+/// 所持魔獣1枠あたりの魔獣数の共通下限（戦闘で0になっても1に戻す）
+pub const MIN_MONSTER_COUNT_PER_CARD_SLOT: u32 = 1;
+
+/// 所持魔獣1枠あたりの魔獣数の共通上限（全魔獣共通）
+pub const MAX_MONSTER_COUNT_PER_CARD_SLOT: u32 = 9999;
+
 /// KC準拠の4種基本資源 + ゴールド（フリマ用通貨）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Resources {
@@ -71,7 +77,7 @@ pub struct PlayerData {
     /// 建設済み施設一覧
     #[serde(default)]
     pub facilities: Vec<BuiltFacility>,
-    /// 所持カード（カードID）
+    /// 所持魔獣（各要素は魔獣マスタID・列名は `owned_cards`）
     #[serde(default)]
     pub owned_cards: Vec<u32>,
     #[serde(default)]
@@ -85,15 +91,18 @@ pub struct PlayerData {
     /// 最後に資源を回収した時刻（Unix timestamp ms）
     #[serde(default = "default_now_ms")]
     pub last_resource_tick: u64,
-    /// 所持カードごとのレベル（owned_cards と同じ長さ）
+    /// 所持魔獣スロットごとのレベル（owned_cards と同じ長さ）
     #[serde(default)]
     pub card_levels: Vec<u32>,
-    /// 所持カードごとの経験値
+    /// 所持魔獣スロットごとの経験値
     #[serde(default)]
     pub card_exp: Vec<u64>,
-    /// 所持カードごとのスタミナ（KC: 出撃・探索に使用）
+    /// 所持魔獣スロットごとのスタミナ（KC: 出撃・探索に使用）
     #[serde(default)]
     pub card_stamina: Vec<u32>,
+    /// 所持魔獣スロットごとの現在魔獣数（`owned_cards` と同じ長さ・本拠 `body_monster_counts` と同期）
+    #[serde(default)]
+    pub card_monster_counts: Vec<u32>,
     /// 探索レベル（同時派遣数に影響）
     #[serde(default)]
     pub exploration_level: u32,
@@ -138,6 +147,7 @@ impl PlayerData {
             card_levels: vec![],
             card_exp: vec![],
             card_stamina: vec![],
+            card_monster_counts: initial_card_monster_counts_for_owned(&default_owned_cards()),
             exploration_level: 1,
             exploration_score: 0,
             unit_cost_cap: default_unit_cost_cap(),
@@ -269,7 +279,7 @@ pub struct GameState {
     /// 建設済み施設一覧（シングルプレイ用）
     #[serde(default)]
     pub facilities: Vec<BuiltFacility>,
-    /// プレイヤーの所持カード（シングルプレイ用）
+    /// プレイヤーの所持魔獣（シングルプレイ用・`owned_cards`）
     #[serde(default)]
     pub owned_cards: Vec<u32>,
     #[serde(default)]
@@ -286,7 +296,7 @@ pub struct GameState {
     /// フリーマーケット出品一覧
     #[serde(default)]
     pub market_listings: Vec<MarketListing>,
-    /// シングルプレイ用: カードごとのレベル（owned_cards と同じ長さ）
+    /// シングルプレイ用: 魔獣スロットごとのレベル（owned_cards と同じ長さ）
     #[serde(default)]
     pub card_levels: Vec<u32>,
     #[serde(default)]
@@ -305,6 +315,9 @@ pub struct GameState {
     pub charge_points: u64,
     #[serde(default)]
     pub explorations: Vec<ExplorationMission>,
+    /// シングルプレイ用: 魔獣スロットごとの魔獣数（`players` 内とミラー）
+    #[serde(default)]
+    pub card_monster_counts: Vec<u32>,
 }
 
 /// KC準拠のシーズン情報（一定期間でマップ・領地リセット）
@@ -372,6 +385,10 @@ pub(crate) fn build_game_state(
         dungeon_points: p.as_ref().map(|x| x.dungeon_points).unwrap_or(state.dungeon_points),
         charge_points: p.as_ref().map(|x| x.charge_points).unwrap_or(state.charge_points),
         explorations: p.as_ref().map(|x| x.explorations.clone()).unwrap_or_else(|| state.explorations.clone()),
+        card_monster_counts: p
+            .as_ref()
+            .map(|x| x.card_monster_counts.clone())
+            .unwrap_or_else(|| state.card_monster_counts.clone()),
     }
 }
 
@@ -411,6 +428,7 @@ impl Default for GameState {
             dungeon_points: 0,
             charge_points: 0,
             explorations: vec![],
+            card_monster_counts: default_player.card_monster_counts.clone(),
         }
     }
 }
@@ -439,10 +457,57 @@ fn default_dev_inventory() -> Vec<InventoryItem> {
     ]
 }
 
-/// 初期所持カード（北欧神話キャラ）
+/// 初期所持魔獣（北欧神話キャラ）
 fn default_owned_cards() -> Vec<u32> {
-    // カードID 0〜9: 初期カード（各1枚）
+    // 魔獣マスタID 0〜9: 初期所持（各1枠）
     vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+}
+
+pub(crate) fn default_monster_count_for_card_id(card_id: u32) -> u32 {
+    get_card(card_id)
+        .map(|c| c.stats.monster_count)
+        .filter(|&m| m > 0)
+        .unwrap_or(1)
+        .clamp(MIN_MONSTER_COUNT_PER_CARD_SLOT, MAX_MONSTER_COUNT_PER_CARD_SLOT)
+}
+
+pub(crate) fn initial_card_monster_counts_for_owned(owned: &[u32]) -> Vec<u32> {
+    owned
+        .iter()
+        .copied()
+        .map(default_monster_count_for_card_id)
+        .collect()
+}
+
+pub(crate) fn ensure_card_monster_counts(player: &mut PlayerData) {
+    let n = player.owned_cards.len();
+    if player.card_monster_counts.len() > n {
+        player.card_monster_counts.truncate(n);
+    }
+    while player.card_monster_counts.len() < n {
+        let idx = player.card_monster_counts.len();
+        let id = player.owned_cards[idx];
+        player
+            .card_monster_counts
+            .push(default_monster_count_for_card_id(id));
+    }
+    for c in &mut player.card_monster_counts {
+        *c = (*c).clamp(MIN_MONSTER_COUNT_PER_CARD_SLOT, MAX_MONSTER_COUNT_PER_CARD_SLOT);
+    }
+}
+
+/// 本拠領地の `troops` / `body_monster_counts` をプレイヤーの所持魔獣列と一致させる
+pub(crate) fn sync_home_territory_body_counts_from_player(
+    territories: &mut [Territory],
+    player: &PlayerData,
+) {
+    let home_id = player.home_territory_id.as_str();
+    let Some(tidx) = get_territory_index(territories, home_id) else {
+        return;
+    };
+    let n = player.owned_cards.len() as u32;
+    territories[tidx].troops = n;
+    territories[tidx].body_monster_counts = Some(player.card_monster_counts.clone());
 }
 
 /// この領地に援軍を送れるか（自領・クランメンバー・配下プレイヤーの領）。
@@ -548,7 +613,7 @@ fn random_level_grid() -> Vec<Vec<u8>> {
     next
 }
 
-/// レベルに対応するカードID
+/// レベルに対応する魔獣ID（`card_id`）
 fn level_to_card_id(level: u8) -> u32 {
     match level {
         1 => 10, // ゴブリン
@@ -571,7 +636,7 @@ pub(crate) fn wave_count_for_level(level: u8) -> u32 {
 }
 
 /// 全マスを領地として生成。id は c_{col}_{row}。本拠地 (24,24) のみプレイヤー所有。地形はランダム。
-/// レベルに応じた中立地の敵を生成（カード定義を使用）
+/// レベルに応じた中立地の敵を生成（魔獣マスタ定義を使用）
 pub(crate) fn generate_neutral_enemies(level: u8) -> (u32, Vec<u32>, Vec<String>) {
     let (card_id, count, mc_per_body): (u32, u32, u32) = match level {
         1 => (10, 1, 50),       // Lv1×1, 50
@@ -605,14 +670,17 @@ fn default_territories() -> Vec<Territory> {
             let name = terrain_name(level).to_string();
             
             if col == HOME_COL && row == HOME_ROW {
-                // プレイヤー本拠地
+                // プレイヤー本拠地（体数・魔獣数は初期所持魔獣と一致）
+                let owned = default_owned_cards();
+                let home_mc = initial_card_monster_counts_for_owned(&owned);
+                let ntroops = owned.len() as u32;
                 out.push(Territory {
                     id,
                     name,
                     level,
                     owner_id: Some(DEFAULT_PLAYER_ID.to_string()),
-                    troops: 10,
-                    body_monster_counts: Some(vec![10u32; 10]),
+                    troops: ntroops,
+                    body_monster_counts: Some(home_mc),
                     body_names: None,
                     ruin: None,
                     is_base: true,
@@ -687,7 +755,7 @@ pub enum Action {
         /// 攻撃側の体ごとの全ステータス。
         #[serde(default)]
         stats_per_body: Option<Vec<CardStats>>,
-        /// 編成に対応する所持カードインデックス（スタミナ・XP用。クライアントが付与）
+        /// 編成に対応する所持魔獣スロットのインデックス（スタミナ・XP用。クライアントが付与）
         #[serde(default)]
         owned_card_indices: Option<Vec<usize>>,
     },
@@ -696,11 +764,17 @@ pub enum Action {
     BuildBase {
         territory_id: String,
     },
-    /// カード合成（KC準拠: 素材カードを消費してベースカードのスキルLvアップ or スキル移植）
+    /// 魔獣合成（KC準拠: 素材魔獣を消費してベース魔獣のスキルLvアップ or スキル移植）
     #[serde(rename = "synthesize_card")]
     SynthesizeCard {
         base_card_index: usize,
         material_card_indices: Vec<usize>,
+    },
+    /// 所持魔獣スロットの魔獣を増産（食料消費・魔獣マスタの上限まで）
+    #[serde(rename = "produce_monsters")]
+    ProduceMonsters {
+        card_index: usize,
+        amount: u32,
     },
     /// 同盟結成（KC準拠）
     #[serde(rename = "create_alliance")]
@@ -777,12 +851,14 @@ pub(crate) fn merge_legacy_into_working_players(
             if !legacy_owned_cards.is_empty() {
                 pd.owned_cards = legacy_owned_cards.to_vec();
             }
+            ensure_card_monster_counts(&mut pd);
             v.insert(pd);
         }
         Entry::Occupied(mut o) => {
             if o.get().owned_cards.is_empty() && !legacy_owned_cards.is_empty() {
                 o.get_mut().owned_cards = legacy_owned_cards.to_vec();
             }
+            ensure_card_monster_counts(o.get_mut());
         }
     }
 }
@@ -794,6 +870,8 @@ pub fn reconcile_singleplayer_after_load(state: &mut GameState) {
         if state.owned_cards.is_empty() && !p.owned_cards.is_empty() {
             state.owned_cards = p.owned_cards.clone();
         }
+        state.card_monster_counts = p.card_monster_counts.clone();
+        sync_home_territory_body_counts_from_player(&mut state.territories, p);
     }
 }
 

@@ -63,6 +63,15 @@ export interface BuiltFacility {
 /** デフォルトのプレイヤーID（シングルプレイ時） */
 export const DEFAULT_PLAYER_ID = "player";
 
+/** 所持魔獣1枠あたりの魔獣数の共通下限（サーバー `MIN_MONSTER_COUNT_PER_CARD_SLOT` と一致） */
+export const MIN_MONSTER_COUNT_PER_CARD_SLOT = 1;
+
+/** 所持魔獣1枠あたりの魔獣数の共通上限（サーバー `MAX_MONSTER_COUNT_PER_CARD_SLOT` と一致） */
+export const MAX_MONSTER_COUNT_PER_CARD_SLOT = 9999;
+
+/** 魔獣1体生産あたりの食料消費（サーバー `FOOD_PER_MONSTER_PRODUCE` と一致） */
+export const FOOD_PER_MONSTER_PRODUCE = 2;
+
 /** KC準拠の4種基本資源 + ゴールド（フリマ用通貨） */
 export interface Resources {
   food: number;
@@ -97,7 +106,7 @@ export interface PlayerData {
   inventory: InventoryItem[];
   /** 建設済み施設一覧 */
   facilities: BuiltFacility[];
-  /** 所持カード（カードID） */
+  /** 所持魔獣（データ列 `owned_cards`・各要素は魔獣マスタID） */
   owned_cards: number[];
   /** 援軍を送れる他プレイヤーのID（クラン・配下など） */
   allied_player_ids: string[];
@@ -106,6 +115,8 @@ export interface PlayerData {
   card_levels?: number[];
   card_exp?: number[];
   card_stamina?: number[];
+  /** 所持魔獣スロットごとの現在魔獣数（本拠の body_monster_counts と対応） */
+  card_monster_counts?: number[];
   exploration_level?: number;
   exploration_score?: number;
   unit_cost_cap?: number;
@@ -140,7 +151,7 @@ export interface GameState {
   inventory?: InventoryItem[];
   /** 建設済み施設一覧（シングルプレイ用） */
   facilities?: BuiltFacility[];
-  /** プレイヤーの所持カード（シングルプレイ用） */
+  /** プレイヤーの所持魔獣（シングルプレイ用・`owned_cards`） */
   owned_cards?: number[];
   /** 4種基本資源（シングルプレイ用） */
   resources?: Resources;
@@ -159,6 +170,8 @@ export interface GameState {
   dungeon_points?: number;
   charge_points?: number;
   explorations?: ExplorationMission[];
+  /** シングルプレイ用ミラー: 魔獣スロットごとの魔獣数 */
+  card_monster_counts?: number[];
 }
 
 /** KC準拠の同盟データ */
@@ -196,10 +209,28 @@ export function getPlayerFacilities(state: GameState, playerId: string = DEFAULT
   return state.players?.[playerId]?.facilities ?? state.facilities ?? [];
 }
 
-/** プレイヤーの所持カードを取得（`players` が空配列でもトップレベル `owned_cards` にフォールバック） */
+/** プレイヤーの食料（トップレベル resources にフォールバック） */
+export function getPlayerFood(state: GameState, playerId: string = DEFAULT_PLAYER_ID): number {
+  const fromPlayer = state.players?.[playerId]?.resources?.food;
+  if (fromPlayer != null && Number.isFinite(fromPlayer)) return fromPlayer;
+  const top = state.resources?.food;
+  if (top != null && Number.isFinite(top)) return top;
+  return 0;
+}
+
+/** プレイヤーの所持魔獣を取得（`players` が空配列でもトップレベル `owned_cards` にフォールバック） */
 export function getPlayerOwnedCards(state: GameState, playerId: string = DEFAULT_PLAYER_ID): number[] {
   const fromPlayer = state.players?.[playerId]?.owned_cards;
   const top = state.owned_cards ?? [];
+  if (Array.isArray(fromPlayer) && fromPlayer.length > 0) return fromPlayer;
+  if (top.length > 0) return top;
+  return Array.isArray(fromPlayer) ? fromPlayer : [];
+}
+
+/** 所持魔獣スロットごとの魔獣数（サーバー権威・トップレベルにフォールバック） */
+export function getPlayerCardMonsterCounts(state: GameState, playerId: string = DEFAULT_PLAYER_ID): number[] {
+  const fromPlayer = state.players?.[playerId]?.card_monster_counts;
+  const top = state.card_monster_counts ?? [];
   if (Array.isArray(fromPlayer) && fromPlayer.length > 0) return fromPlayer;
   if (top.length > 0) return top;
   return Array.isArray(fromPlayer) ? fromPlayer : [];
@@ -237,7 +268,7 @@ export const LEVEL_TERRAIN: Record<number, string> = {
   6: "川",
 };
 
-/** カードのステータス */
+/** 魔獣（戦闘送信用ステータス） */
 export interface CardStatsPayload {
   monster_count: number;
   speed: number;
@@ -290,7 +321,7 @@ export type Action =
     skills_per_body?: SkillDataPayload[];
     /** 攻撃側の体ごとの全ステータス */
     stats_per_body?: CardStatsPayload[];
-    /** 所持カード配列上のインデックス（スタミナ・XP用） */
+    /** 所持魔獣スロットのインデックス（スタミナ・XP用） */
     owned_card_indices?: number[];
   }
   | {
@@ -310,7 +341,8 @@ export type Action =
   | { action: "cancel_flea_market_listing"; listing_id: string }
   | { action: "start_exploration"; territory_id: string; card_indices: number[] }
   | { action: "collect_exploration"; mission_id: string }
-  | { action: "donate_alliance"; food: number; wood: number; stone: number; iron: number };
+  | { action: "donate_alliance"; food: number; wood: number; stone: number; iron: number }
+  | { action: "produce_monsters"; card_index: number; amount: number };
 
 export const END_TURN_ACTION: Action = { action: "end_turn" };
 
@@ -359,4 +391,8 @@ export function attackAction(
     ...(ownedCardIndices != null &&
       ownedCardIndices.length === count && { owned_card_indices: ownedCardIndices }),
   };
+}
+
+export function produceMonstersAction(cardIndex: number, amount: number): Action {
+  return { action: "produce_monsters", card_index: cardIndex, amount };
 }

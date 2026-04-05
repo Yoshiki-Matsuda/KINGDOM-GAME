@@ -84,10 +84,10 @@ function getLogIcon(type: LogType): string {
   }
 }
 
-/** 占領/失敗の直後に続く戦利品・カード入手（同一攻撃の結果） */
+/** 占領/失敗の直後に続く戦利品・魔獣入手（同一攻撃の結果） */
 function isLootRelatedLine(line: string): boolean {
   if (line.startsWith("--- 戦利品 ---")) return true;
-  if (line.startsWith("--- カード入手 ---")) return true;
+  if (line.startsWith("--- 魔獣入手 ---")) return true;
   if (line.includes("を入手！")) return true;
   if (line === "遺跡を攻略しました！") return true;
   return false;
@@ -106,7 +106,7 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
   /** 現在の戦闘グループの基準タイムスタンプ */
   let currentBattleTsMs: number | null = null;
 
-  /** 進行中のカードを確定して histories へ追加 */
+  /** 進行中の魔獣入手ブロックを確定して histories へ追加 */
   function finalizeCurrent() {
     if (!currentBattle) return;
     if (currentAction) currentBattle.actions.push(currentAction);
@@ -134,11 +134,11 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
           icon: "🎁",
           lines: [],
         };
-      } else if (line.startsWith("--- カード入手 ---")) {
+      } else if (line.startsWith("--- 魔獣入手 ---")) {
         if (currentAction) currentBattle.actions.push(currentAction);
         currentAction = {
           type: "phase",
-          title: "カード入手",
+          title: "魔獣入手",
           icon: "🃏",
           lines: [],
         };
@@ -332,7 +332,7 @@ function formatTime(date: Date): string {
   return `${h}:${m}:${s}`;
 }
 
-/** 戦闘履歴カードをレンダリング */
+/** 戦闘履歴の1エントリをレンダリング */
 function renderHistoryCard(battle: BattleHistory): string {
   const resultClass = battle.result === "victory" ? "history-victory" : 
                       battle.result === "defeat" ? "history-defeat" : "history-ongoing";

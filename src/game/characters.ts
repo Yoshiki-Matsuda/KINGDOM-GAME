@@ -12,7 +12,7 @@ export const DEFAULT_BODY_SPEED = 5;
 /** 移動時間の基本係数（秒/マス）。SPEEDで割る */
 export const BASE_TRAVEL_TIME_PER_TILE = 2.0;
 
-/** カードの基本ステータス定義 */
+/** 魔獣の基本ステータス定義 */
 export interface CardStats {
   /** 魔獣数（HP/ベース係数） */
   monster_count: number;
@@ -46,7 +46,7 @@ export const DEFAULT_CARD_STATS: CardStats = {
   occupationPower: 100,
 };
 
-/** カードのレアリティ */
+/** 魔獣のレアリティ */
 export type CardRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 
 /** KC準拠の7種族 */
@@ -63,7 +63,7 @@ export interface CharacterData {
 
 /** 各キャラクターの固有ステータス */
 const CHARACTER_STATS: Record<number, Partial<CardStats>> = {
-  // === プレイヤー初期カード（KC 7種族） ===
+  // === プレイヤー初期魔獣（KC 7種族） ===
   0: { monster_count: 15, attack: 9, intelligence: 3, defense: 4, magicDefense: 3, speed: 6 },  // ダイアウルフ
   1: { monster_count: 18, attack: 7, intelligence: 4, defense: 6, magicDefense: 3, speed: 5 },  // ゴブリンウォリアー
   2: { monster_count: 10, attack: 4, intelligence: 10, defense: 2, magicDefense: 6, speed: 7, range: 2 }, // インプ
@@ -107,7 +107,7 @@ const CHARACTER_STATS: Record<number, Partial<CardStats>> = {
   42: { monster_count: 22, attack: 15, intelligence: 25, defense: 12, magicDefense: 20, speed: 5, range: 2 }, // リッチ
   43: { monster_count: 35, attack: 22, intelligence: 12, defense: 25, magicDefense: 18, speed: 2 }, // タイタン
 
-  // === 収集可能カード ===
+  // === 収集可能魔獣 ===
   // --- 獣族 ---
   50: { monster_count: 8, attack: 4, intelligence: 2, defense: 3, magicDefense: 2, speed: 8 },   // バット
   51: { monster_count: 10, attack: 6, intelligence: 3, defense: 5, magicDefense: 3, speed: 7 },  // ジャイアントバット
@@ -162,7 +162,7 @@ export function getCharacterStats(index: number): CardStats {
 
 /** 全キャラクター名 */
 const CHARACTER_NAMES: Record<number, string> = {
-  // プレイヤー初期カード（KC 7種族）
+  // プレイヤー初期魔獣（KC 7種族）
   0: "ダイアウルフ",
   1: "ゴブリンウォリアー",
   2: "インプ",
@@ -219,9 +219,9 @@ const CHARACTER_NAMES: Record<number, string> = {
   110: "ゾンビ", 111: "レイス", 112: "ワイト", 113: "ドゥラハン", 114: "エルダーリッチ",
 };
 
-/** カードのレアリティ */
+/** 魔獣のレアリティ */
 const CHARACTER_RARITY: Record<number, CardRarity> = {
-  // プレイヤー初期カード
+  // プレイヤー初期魔獣
   0: "rare", 1: "rare", 2: "rare", 3: "rare", 4: "rare",
   5: "rare", 6: "rare", 7: "rare", 8: "rare", 9: "rare",
   // フィールド敵
@@ -276,22 +276,22 @@ export function getBodyDisplayName(index: number): string {
   return CHARACTER_NAMES[index] ?? `キャラ${index + 1}`;
 }
 
-/** カードイラストのパス（キャラクターインデックス→画像URL） */
+/** 魔獣イラストのパス（キャラクターインデックス→画像URL） */
 export function getCharacterIllustrationPath(index: number): string {
   return `/cards/character-${index}.png`;
 }
 
-/** カードのレアリティを取得 */
+/** 魔獣のレアリティを取得 */
 export function getCardRarity(index: number): CardRarity {
   return CHARACTER_RARITY[index] ?? "common";
 }
 
-/** カードの種族を取得 */
+/** 魔獣の種族を取得 */
 export function getCardRace(index: number): Race {
   return CHARACTER_RACES[index] ?? "demihuman";
 }
 
-/** カード名からインデックスを取得 */
+/** 魔獣名からインデックスを取得 */
 export function getCardIndexByName(name: string): number | undefined {
   for (const [idx, n] of Object.entries(CHARACTER_NAMES)) {
     if (n === name) return parseInt(idx);

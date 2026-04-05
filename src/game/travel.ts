@@ -7,11 +7,13 @@ import {
     travelIntervalId, setTravelIntervalId,
     setAttackSourceId,
     formedUnitsList, setFormedUnitsList,
+    gameState,
     render,
 } from "../store";
 import type { TravelingUnit } from "../store";
 import { attackAction, deployAction } from "../shared/game-state";
 import { BASE_TRAVEL_TIME_PER_TILE } from "./characters";
+import { getAdjacentAttackSource } from "./combat";
 
 /** 本拠地(24,24)から領地までのマンハッタン距離（マス数） */
 export { getDistanceBetweenTerritories, getDistanceFromHome } from "./territories";
@@ -28,9 +30,14 @@ export function getTravelTimeMs(distance: number, avgSpeed: number): number {
 function sendTraveledAction(t: TravelingUnit): TravelingUnit | null {
     if (t.actionType === "return") return null;
     if (ws?.readyState !== WebSocket.OPEN) return null;
-    if (t.actionType === "attack" && t.fromId != null) {
+    if (t.actionType === "attack") {
+        const fromId = t.fromId ?? getAdjacentAttackSource(gameState, t.targetId) ?? null;
+        if (fromId == null || fromId === "") {
+            console.warn("[kingdom] 攻撃元領地を決められませんでした。隣接する自領を確認してください。", t);
+            return null;
+        }
         ws.send(JSON.stringify(attackAction(
-            t.fromId,
+            fromId,
             t.targetId,
             t.count,
             t.monstersPerBody,

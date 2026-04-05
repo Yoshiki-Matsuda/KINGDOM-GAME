@@ -10,6 +10,7 @@ import {
   render,
 } from "../store";
 import { canReceiveReinforcement, isAttackable, getAdjacentAttackSource, isHomeTerritory } from "../game/combat";
+import { isKcUnitReadyToDeploy } from "../game/formation";
 import {
   formatRuinTimeLeft,
   renderNeutralTerritoryMenu,
@@ -112,18 +113,27 @@ function onMenuClick(e: MouseEvent): void {
 
   if (action === "deploy") {
     const tid = btn.dataset.territory ?? null;
-    const hasFormedUnit = formedUnitsList.filter((u) => u.indices.every((i) => i >= 0)).length >= 1;
-    if (tid && ws?.readyState === WebSocket.OPEN && hasFormedUnit) {
+    const hasFormedUnit = formedUnitsList.filter((u) => isKcUnitReadyToDeploy(u.indices)).length >= 1;
+    if (!tid) {
       closeMenu();
-      showUnitSelect({ type: "deploy", territoryId: tid });
-    } else if (!tid) {
-      closeMenu();
-    } else if (!hasFormedUnit) {
-      closeMenu();
-    } else {
+      return;
+    }
+    if (!hasFormedUnit) {
+      alert(
+        "援軍に出せるユニットがありません。編成画面でリーダー枠にキャラを置いてユニットを編成してください。",
+      );
       closeMenu();
       render();
+      return;
     }
+    if (ws?.readyState !== WebSocket.OPEN) {
+      alert("サーバーに接続されていません。接続後にもう一度お試しください。");
+      closeMenu();
+      render();
+      return;
+    }
+    closeMenu();
+    showUnitSelect({ type: "deploy", territoryId: tid });
     return;
   }
   if (action === "attack-from") {
@@ -135,18 +145,37 @@ function onMenuClick(e: MouseEvent): void {
   if (action === "attack") {
     const toId = btn.dataset.to ?? null;
     const fromId = attackSourceId ?? (toId ? getAdjacentAttackSource(gameState, toId) : null);
-    const hasFormedUnit = formedUnitsList.filter((u) => u.indices.every((i) => i >= 0)).length >= 1;
-    if (ws?.readyState === WebSocket.OPEN && fromId && toId && hasFormedUnit) {
-      closeMenu();
-      showUnitSelect({ type: "attack", fromId, toId });
-    } else {
-      if (!toId) console.warn("[攻撃] 攻撃先がありません");
-      else if (!fromId) console.warn("[攻撃] 隣接する自領がありません");
-      else if (ws?.readyState !== WebSocket.OPEN) console.warn("[攻撃] サーバー未接続");
-      else if (!hasFormedUnit) console.warn("[攻撃] 編成されたユニットがありません（3体で1ユニットに編成されると出撃できます）");
+    const hasFormedUnit = formedUnitsList.filter((u) => isKcUnitReadyToDeploy(u.indices)).length >= 1;
+    if (!toId) {
+      alert("攻撃先のマスが不正です。");
       closeMenu();
       render();
+      return;
     }
+    if (!fromId) {
+      alert(
+        "このマスに隣接する自領がありません。本拠や占領済みマスの隣から攻撃してください。自領マスで「攻撃」を選んでから隣の敵／中立マスを攻撃することもできます。",
+      );
+      closeMenu();
+      render();
+      return;
+    }
+    if (!hasFormedUnit) {
+      alert(
+        "攻撃に出せるユニットがありません。編成画面でリーダー枠にキャラを置いてから、もう一度お試しください。",
+      );
+      closeMenu();
+      render();
+      return;
+    }
+    if (ws?.readyState !== WebSocket.OPEN) {
+      alert("サーバーに接続されていません。接続後にもう一度お試しください。");
+      closeMenu();
+      render();
+      return;
+    }
+    closeMenu();
+    showUnitSelect({ type: "attack", fromId, toId });
     return;
   }
 }

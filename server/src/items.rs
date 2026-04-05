@@ -377,7 +377,7 @@ pub fn item_name(item_id: &str) -> &'static str {
         EXP_CRYSTAL => "経験値結晶",
         SUMMON_SHARD => "召喚の欠片",
         GOLD => "ゴールド",
-        CARD_PACK_TICKET => "カードパック券",
+        CARD_PACK_TICKET => "魔獣パック券",
         RARE_PACK_TICKET => "レアパック券",
         _ => "不明なアイテム",
     }

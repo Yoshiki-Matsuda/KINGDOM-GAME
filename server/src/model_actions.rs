@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use rand::seq::SliceRandom;
 use rand::Rng;
 
@@ -6,14 +8,17 @@ use crate::model::{
     build_game_state,
     can_receive_reinforcement,
     default_now_ms,
+    ensure_card_monster_counts,
     generate_neutral_enemies,
     get_territory_index,
     home_territory_id,
+    initial_card_monster_counts_for_owned,
     is_attackable_target,
     territories_are_adjacent,
     is_home_territory,
     parse_territory_coords,
     push_log,
+    sync_home_territory_body_counts_from_player,
     territory_name,
     wave_count_for_level,
     Action,
@@ -86,6 +91,9 @@ pub(crate) fn apply_action(state: &GameState, action: &Action, dev_auto_win: boo
         Action::DonateAlliance { food, wood, stone, iron } => {
             apply_donate_alliance(state, &mut log, *food, *wood, *stone, *iron)
         }
+        Action::ProduceMonsters { card_index, amount } => {
+            apply_produce_monsters(state, &mut log, *card_index, *amount)
+        }
     };
     // ハンドラーが state.clone() で早期リターンしても push_log の内容が失われないよう、
     // 常に外側で管理している log を最終状態に反映する
@@ -102,7 +110,86 @@ fn remove_indices_from_parallel_vec<T: Clone>( vec: &mut Vec<T>, sorted_asc: &[u
     }
 }
 
-/// KC準拠カード合成: 素材カードを消費してベースカードのスキルレベルアップ
+/// 魔獣1体あたりの食料コスト（生産）
+const FOOD_PER_MONSTER_PRODUCE: u64 = 2;
+
+fn apply_produce_monsters(
+    state: &GameState,
+    log: &mut Vec<String>,
+    card_index: usize,
+    amount: u32,
+) -> GameState {
+    if amount == 0 {
+        push_log(log, "生産量は1以上にしてください。".to_string());
+        return state.clone();
+    }
+    let mut players = state.players.clone();
+    crate::model::merge_legacy_into_working_players(&state.owned_cards, &mut players);
+    let Some(player) = players.get_mut(DEFAULT_PLAYER_ID) else {
+        return state.clone();
+    };
+    ensure_card_monster_counts(player);
+    if card_index >= player.owned_cards.len() {
+        push_log(log, "無効な魔獣スロットです。".to_string());
+        return state.clone();
+    }
+    let card_id = player.owned_cards[card_index];
+    let cap = crate::model::MAX_MONSTER_COUNT_PER_CARD_SLOT;
+    let cur = player
+        .card_monster_counts
+        .get(card_index)
+        .copied()
+        .unwrap_or(1)
+        .min(cap);
+    let room = cap.saturating_sub(cur);
+    let add = amount.min(room);
+    if add == 0 {
+        push_log(
+            log,
+            format!(
+                "これ以上魔獣を生産できません（1スロットあたり上限{}体）。",
+                cap
+            ),
+        );
+        return state.clone();
+    }
+    let food_cost = (add as u64).saturating_mul(FOOD_PER_MONSTER_PRODUCE);
+    if player.resources.food < food_cost {
+        push_log(log, "食料が足りません。".to_string());
+        return state.clone();
+    }
+    player.resources.food -= food_cost;
+    player.card_monster_counts[card_index] = cur.saturating_add(add);
+    let card_name = crate::cards::get_card(card_id)
+        .map(|c| c.name.to_string())
+        .unwrap_or_else(|| format!("魔獣#{}", card_id));
+    push_log(
+        log,
+        format!(
+            "「{}」に魔獣を{}体生産した（食料{}を消費）。",
+            card_name, add, food_cost
+        ),
+    );
+
+    let mut territories = state.territories.clone();
+    sync_home_territory_body_counts_from_player(&mut territories, player);
+
+    let owned_cards = player.owned_cards.clone();
+    let card_skill_levels = player.card_skill_levels.clone();
+    build_game_state(
+        state,
+        state.turn,
+        territories,
+        log.clone(),
+        players,
+        state.inventory.clone(),
+        state.facilities.clone(),
+        owned_cards,
+        card_skill_levels,
+    )
+}
+
+/// KC準拠合成: 素材魔獣を消費してベース魔獣のスキルレベルアップ
 fn apply_synthesize_card(
     state: &GameState,
     log: &mut Vec<String>,
@@ -119,7 +206,7 @@ fn apply_synthesize_card(
     let base_card_id = owned_cards[base_idx];
     let base_name = crate::cards::get_card(base_card_id)
         .map(|c| c.name.to_string())
-        .unwrap_or_else(|| format!("カード#{}", base_card_id));
+        .unwrap_or_else(|| format!("魔獣#{}", base_card_id));
 
     let material_count = material_indices.len();
     let level_up = (material_count as u8).min(9);
@@ -129,14 +216,31 @@ fn apply_synthesize_card(
         base_name, material_count, level_up
     ));
 
+    let mut sorted_removals: Vec<usize> = material_indices.to_vec();
+    sorted_removals.sort();
+
+    let mut players = state.players.clone();
+    crate::model::merge_legacy_into_working_players(&state.owned_cards, &mut players);
+    let mut card_monster_counts = match players.get_mut(DEFAULT_PLAYER_ID) {
+        Some(p) => {
+            ensure_card_monster_counts(p);
+            let c = p.card_monster_counts.clone();
+            if c.len() != owned_cards.len() {
+                initial_card_monster_counts_for_owned(&owned_cards)
+            } else {
+                c
+            }
+        }
+        None => initial_card_monster_counts_for_owned(&owned_cards),
+    };
+    remove_indices_from_parallel_vec(&mut card_monster_counts, &sorted_removals);
+
     let mut to_remove: Vec<usize> = material_indices.to_vec();
     to_remove.sort_unstable_by(|a, b| b.cmp(a));
     for idx in to_remove {
         owned_cards.remove(idx);
     }
 
-    let mut sorted_removals: Vec<usize> = material_indices.to_vec();
-    sorted_removals.sort();
     let mut card_skill_levels = std::collections::HashMap::new();
     for (&old_idx, &levels) in &state.card_skill_levels {
         if material_indices.contains(&old_idx) { continue; }
@@ -163,13 +267,13 @@ fn apply_synthesize_card(
         remove_indices_from_parallel_vec(&mut card_stamina, &sorted_removals);
     }
 
-    let mut players = state.players.clone();
     if let Some(player) = players.get_mut(DEFAULT_PLAYER_ID) {
         player.owned_cards = owned_cards.clone();
         player.card_skill_levels = card_skill_levels.clone();
         player.card_levels = card_levels.clone();
         player.card_exp = card_exp.clone();
         player.card_stamina = card_stamina.clone();
+        player.card_monster_counts = card_monster_counts.clone();
     }
 
     let mut next = state.clone();
@@ -179,10 +283,15 @@ fn apply_synthesize_card(
     next.card_exp = card_exp;
     next.card_stamina = card_stamina;
 
+    let mut territories = state.territories.clone();
+    if let Some(p) = players.get(DEFAULT_PLAYER_ID) {
+        sync_home_territory_body_counts_from_player(&mut territories, p);
+    }
+
     build_game_state(
         &next,
         state.turn,
-        state.territories.clone(),
+        territories,
         log.clone(),
         players,
         state.inventory.clone(),
@@ -899,19 +1008,33 @@ fn apply_attack_action(
         if oci.len() != count as usize {
             return state.clone();
         }
+        let mut seen_slots = HashSet::new();
+        for &i in oci {
+            if !seen_slots.insert(i) {
+                push_log(log, "同一体スロットを複数回指定できません。".to_string());
+                return state.clone();
+            }
+        }
+        let from_troops_usz = territories[from_idx].troops as usize;
+        for &i in oci {
+            if i >= from_troops_usz {
+                push_log(log, "出撃元の兵力スロットが無効です。".to_string());
+                return state.clone();
+            }
+        }
         let Some(player) = working_players.get(DEFAULT_PLAYER_ID) else {
             return state.clone();
         };
         for &i in oci {
             if i >= player.owned_cards.len() {
-                push_log(log, "無効なカードインデックスです。".to_string());
+                push_log(log, "無効な魔獣スロットです。".to_string());
                 return state.clone();
             }
         }
         for &i in oci {
             let st = player.card_stamina.get(i).copied().unwrap_or(120);
             if st < STAMINA_ATTACK {
-                push_log(log, "スタミナが足りないカードが含まれています。".to_string());
+                push_log(log, "スタミナが足りない魔獣が含まれています。".to_string());
                 return state.clone();
             }
         }
@@ -927,16 +1050,35 @@ fn apply_attack_action(
         }
     }
 
-    let remaining_from_troops = territories[from_idx].troops.saturating_sub(count);
-    territories[from_idx].troops = remaining_from_troops;
-    if let Some(ref mut bm) = territories[from_idx].body_monster_counts {
-        while bm.len() > remaining_from_troops as usize {
-            bm.pop();
+    if let Some(ref oci) = owned_card_indices {
+        let from_t = &mut territories[from_idx];
+        let mut slots: Vec<usize> = oci.clone();
+        slots.sort_unstable_by(|a, b| b.cmp(a));
+        for idx in slots {
+            from_t.troops = from_t.troops.saturating_sub(1);
+            if let Some(ref mut bm) = from_t.body_monster_counts {
+                if idx < bm.len() {
+                    bm.remove(idx);
+                }
+            }
+            if let Some(ref mut bn) = from_t.body_names {
+                if idx < bn.len() {
+                    bn.remove(idx);
+                }
+            }
         }
-    }
-    if let Some(ref mut bn) = territories[from_idx].body_names {
-        while bn.len() > remaining_from_troops as usize {
-            bn.pop();
+    } else {
+        let remaining_from_troops = territories[from_idx].troops.saturating_sub(count);
+        territories[from_idx].troops = remaining_from_troops;
+        if let Some(ref mut bm) = territories[from_idx].body_monster_counts {
+            while bm.len() > remaining_from_troops as usize {
+                bm.pop();
+            }
+        }
+        if let Some(ref mut bn) = territories[from_idx].body_names {
+            while bn.len() > remaining_from_troops as usize {
+                bn.pop();
+            }
         }
     }
 
@@ -1920,10 +2062,10 @@ fn apply_attack_action(
 
         let dropped_cards = calculate_card_drops(&enemy_names, facility_bonuses.drop_rate as f32);
         if !dropped_cards.is_empty() {
-            push_log(log, "--- カード入手 ---".to_string());
+            push_log(log, "--- 魔獣入手 ---".to_string());
             for card_id in &dropped_cards {
                 if let Some(card) = crate::cards::get_card(*card_id) {
-                    push_log(log, format!("カード「{}」を入手！", card.name));
+                    push_log(log, format!("魔獣「{}」を入手！", card.name));
                     new_owned_cards.push(*card_id);
                 }
             }
@@ -1946,6 +2088,24 @@ fn apply_attack_action(
     if let Some(player) = new_players.get_mut(DEFAULT_PLAYER_ID) {
         player.inventory = new_inventory.clone();
         player.owned_cards = new_owned_cards.clone();
+        ensure_card_monster_counts(player);
+        if let Some(ref oci) = owned_card_indices {
+            if oci.len() == our_chars.len() {
+                for (j, &card_idx) in oci.iter().enumerate() {
+                    if card_idx < player.card_monster_counts.len() {
+                        let surv = our_chars
+                            .get(j)
+                            .map(|c| c.effective_monster_count())
+                            .unwrap_or(crate::model::MIN_MONSTER_COUNT_PER_CARD_SLOT);
+                        player.card_monster_counts[card_idx] = surv.clamp(
+                            crate::model::MIN_MONSTER_COUNT_PER_CARD_SLOT,
+                            crate::model::MAX_MONSTER_COUNT_PER_CARD_SLOT,
+                        );
+                    }
+                }
+            }
+        }
+        sync_home_territory_body_counts_from_player(&mut territories, player);
         if conquered {
             if let Some(ref idxs) = owned_card_indices {
                 let xp_gain = 40_u64.saturating_add(facility_bonuses.exp_bonus as u64 / 2);
@@ -1997,7 +2157,7 @@ fn apply_start_exploration(
         return state.clone();
     }
     if card_indices.is_empty() {
-        push_log(log, "探索に使用するカードを選んでください。".to_string());
+        push_log(log, "探索に使用する魔獣を選んでください。".to_string());
         return state.clone();
     }
     let max_slots = player.exploration_level.max(1) as usize;
@@ -2007,7 +2167,7 @@ fn apply_start_exploration(
     }
     for &i in card_indices {
         if i >= player.owned_cards.len() {
-            push_log(log, "無効なカードインデックスです。".to_string());
+            push_log(log, "無効な魔獣スロットです。".to_string());
             return state.clone();
         }
     }
@@ -2191,71 +2351,76 @@ fn apply_list_on_flea_market(
     }
 
     let mut new_state = state.clone();
-    let Some(player) = new_state.players.get_mut(DEFAULT_PLAYER_ID) else {
-        return state.clone();
-    };
-
-    let item_desc = match item {
-        MarketItemType::Card { card_id } => {
-            let idx = player.owned_cards.iter().position(|&id| id == *card_id);
-            match idx {
-                Some(i) => {
-                    player.owned_cards.remove(i);
-                    let name = crate::cards::get_card(*card_id)
-                        .map(|c| c.name.to_string())
-                        .unwrap_or_else(|| format!("カード#{}", card_id));
-                    name
-                }
-                None => {
-                    push_log(log, "出品するカードを所持していません。".to_string());
-                    return state.clone();
-                }
-            }
-        }
-        MarketItemType::Item { item_id, count } => {
-            let inv_item = player.inventory.iter_mut().find(|i| i.item_id == *item_id);
-            match inv_item {
-                Some(inv) if inv.count >= *count => {
-                    inv.count -= count;
-                    if inv.count == 0 {
-                        player.inventory.retain(|i| i.item_id != *item_id);
+    let item_desc = {
+        let Some(player) = new_state.players.get_mut(DEFAULT_PLAYER_ID) else {
+            return state.clone();
+        };
+        match item {
+            MarketItemType::Card { card_id } => {
+                let idx = player.owned_cards.iter().position(|&id| id == *card_id);
+                match idx {
+                    Some(i) => {
+                        player.owned_cards.remove(i);
+                        if i < player.card_monster_counts.len() {
+                            player.card_monster_counts.remove(i);
+                        }
+                        ensure_card_monster_counts(player);
+                        let name = crate::cards::get_card(*card_id)
+                            .map(|c| c.name.to_string())
+                            .unwrap_or_else(|| format!("魔獣#{}", card_id));
+                        name
                     }
-                    let name = crate::items::item_name(item_id);
-                    format!("{}x{}", name, count)
+                    None => {
+                        push_log(log, "出品する魔獣を所持していません。".to_string());
+                        return state.clone();
+                    }
                 }
-                _ => {
-                    push_log(log, "出品するアイテムが足りません。".to_string());
+            }
+            MarketItemType::Item { item_id, count } => {
+                let inv_item = player.inventory.iter_mut().find(|i| i.item_id == *item_id);
+                match inv_item {
+                    Some(inv) if inv.count >= *count => {
+                        inv.count -= count;
+                        if inv.count == 0 {
+                            player.inventory.retain(|i| i.item_id != *item_id);
+                        }
+                        let name = crate::items::item_name(item_id);
+                        format!("{}x{}", name, count)
+                    }
+                    _ => {
+                        push_log(log, "出品するアイテムが足りません。".to_string());
+                        return state.clone();
+                    }
+                }
+            }
+            MarketItemType::Resource { resource_type, amount } => {
+                let has_enough = match resource_type.as_str() {
+                    "food" => player.resources.food >= *amount,
+                    "wood" => player.resources.wood >= *amount,
+                    "stone" => player.resources.stone >= *amount,
+                    "iron" => player.resources.iron >= *amount,
+                    _ => false,
+                };
+                if !has_enough || *amount == 0 {
+                    push_log(log, "出品する資源が足りません。".to_string());
                     return state.clone();
                 }
+                match resource_type.as_str() {
+                    "food" => player.resources.food -= amount,
+                    "wood" => player.resources.wood -= amount,
+                    "stone" => player.resources.stone -= amount,
+                    "iron" => player.resources.iron -= amount,
+                    _ => {}
+                }
+                let type_name = match resource_type.as_str() {
+                    "food" => "食料",
+                    "wood" => "木材",
+                    "stone" => "石材",
+                    "iron" => "鉄",
+                    _ => "不明",
+                };
+                format!("{}x{}", type_name, amount)
             }
-        }
-        MarketItemType::Resource { resource_type, amount } => {
-            let has_enough = match resource_type.as_str() {
-                "food" => player.resources.food >= *amount,
-                "wood" => player.resources.wood >= *amount,
-                "stone" => player.resources.stone >= *amount,
-                "iron" => player.resources.iron >= *amount,
-                _ => false,
-            };
-            if !has_enough || *amount == 0 {
-                push_log(log, "出品する資源が足りません。".to_string());
-                return state.clone();
-            }
-            match resource_type.as_str() {
-                "food" => player.resources.food -= amount,
-                "wood" => player.resources.wood -= amount,
-                "stone" => player.resources.stone -= amount,
-                "iron" => player.resources.iron -= amount,
-                _ => {}
-            }
-            let type_name = match resource_type.as_str() {
-                "food" => "食料",
-                "wood" => "木材",
-                "stone" => "石材",
-                "iron" => "鉄",
-                _ => "不明",
-            };
-            format!("{}x{}", type_name, amount)
         }
     };
 
@@ -2273,8 +2438,19 @@ fn apply_list_on_flea_market(
         listed_at: now,
     });
 
+    let mut territories = new_state.territories.clone();
+    if let Some(p) = new_state.players.get(DEFAULT_PLAYER_ID) {
+        sync_home_territory_body_counts_from_player(&mut territories, p);
+    }
+    new_state.territories = territories;
+
+    let Some(player) = new_state.players.get(DEFAULT_PLAYER_ID) else {
+        return state.clone();
+    };
     new_state.owned_cards = player.owned_cards.clone();
     new_state.inventory = player.inventory.clone();
+    new_state.card_monster_counts = player.card_monster_counts.clone();
+    new_state.resources = player.resources.clone();
     push_log(log, format!("フリマに{}を{}Gで出品しました。", item_desc, price));
     new_state.log = log.clone();
     new_state
@@ -2312,6 +2488,7 @@ fn apply_buy_from_flea_market(
     match &listing.item {
         MarketItemType::Card { card_id } => {
             buyer.owned_cards.push(*card_id);
+            ensure_card_monster_counts(buyer);
         }
         MarketItemType::Item { item_id, count } => {
             if let Some(inv) = buyer.inventory.iter_mut().find(|i| i.item_id == *item_id) {
@@ -2346,7 +2523,7 @@ fn apply_buy_from_flea_market(
         MarketItemType::Card { card_id } => {
             crate::cards::get_card(*card_id)
                 .map(|c| c.name.to_string())
-                .unwrap_or_else(|| format!("カード#{}", card_id))
+                .unwrap_or_else(|| format!("魔獣#{}", card_id))
         }
         MarketItemType::Item { item_id, count } => {
             format!("{}x{}", crate::items::item_name(item_id), count)
@@ -2362,9 +2539,17 @@ fn apply_buy_from_flea_market(
 
     new_state.market_listings.remove(idx);
 
+    let mut territories = new_state.territories.clone();
+    if let Some(p) = new_state.players.get(DEFAULT_PLAYER_ID) {
+        sync_home_territory_body_counts_from_player(&mut territories, p);
+    }
+    new_state.territories = territories;
+
     let buyer_ref = new_state.players.get(DEFAULT_PLAYER_ID).unwrap();
     new_state.owned_cards = buyer_ref.owned_cards.clone();
     new_state.inventory = buyer_ref.inventory.clone();
+    new_state.card_monster_counts = buyer_ref.card_monster_counts.clone();
+    new_state.resources = buyer_ref.resources.clone();
 
     push_log(log, format!(
         "フリマで{}を{}Gで購入（手数料{}G）",
@@ -2393,37 +2578,50 @@ fn apply_cancel_flea_market_listing(
     let mut new_state = state.clone();
     let listing = new_state.market_listings.remove(idx);
 
-    let Some(player) = new_state.players.get_mut(DEFAULT_PLAYER_ID) else {
-        return state.clone();
-    };
-
-    match &listing.item {
-        MarketItemType::Card { card_id } => {
-            player.owned_cards.push(*card_id);
-        }
-        MarketItemType::Item { item_id, count } => {
-            if let Some(inv) = player.inventory.iter_mut().find(|i| i.item_id == *item_id) {
-                inv.count += count;
-            } else {
-                player.inventory.push(crate::items::InventoryItem {
-                    item_id: item_id.clone(),
-                    count: *count,
-                });
+    {
+        let Some(player) = new_state.players.get_mut(DEFAULT_PLAYER_ID) else {
+            return state.clone();
+        };
+        match &listing.item {
+            MarketItemType::Card { card_id } => {
+                player.owned_cards.push(*card_id);
+                ensure_card_monster_counts(player);
             }
-        }
-        MarketItemType::Resource { resource_type, amount } => {
-            match resource_type.as_str() {
-                "food" => player.resources.food += amount,
-                "wood" => player.resources.wood += amount,
-                "stone" => player.resources.stone += amount,
-                "iron" => player.resources.iron += amount,
-                _ => {}
+            MarketItemType::Item { item_id, count } => {
+                if let Some(inv) = player.inventory.iter_mut().find(|i| i.item_id == *item_id) {
+                    inv.count += count;
+                } else {
+                    player.inventory.push(crate::items::InventoryItem {
+                        item_id: item_id.clone(),
+                        count: *count,
+                    });
+                }
+            }
+            MarketItemType::Resource { resource_type, amount } => {
+                match resource_type.as_str() {
+                    "food" => player.resources.food += amount,
+                    "wood" => player.resources.wood += amount,
+                    "stone" => player.resources.stone += amount,
+                    "iron" => player.resources.iron += amount,
+                    _ => {}
+                }
             }
         }
     }
 
+    let mut territories = new_state.territories.clone();
+    if let Some(p) = new_state.players.get(DEFAULT_PLAYER_ID) {
+        sync_home_territory_body_counts_from_player(&mut territories, p);
+    }
+    new_state.territories = territories;
+
+    let Some(player) = new_state.players.get(DEFAULT_PLAYER_ID) else {
+        return state.clone();
+    };
     new_state.owned_cards = player.owned_cards.clone();
     new_state.inventory = player.inventory.clone();
+    new_state.card_monster_counts = player.card_monster_counts.clone();
+    new_state.resources = player.resources.clone();
     push_log(log, "出品を取り消しました。".to_string());
     new_state.log = log.clone();
     new_state

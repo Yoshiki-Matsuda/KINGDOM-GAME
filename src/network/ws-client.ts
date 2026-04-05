@@ -8,7 +8,7 @@ import {
   render, WS_URL,
 } from "../store";
 import type { GameState } from "../store";
-import { ensureDevUnit } from "../game/formation";
+import { ensureDevUnit, validateFormedUnits } from "../game/formation";
 
 /** WebSocket接続を開始する。UIコールバックを受け取ってメニュー・ユニット選択を閉じる */
 export function connect(callbacks: {
@@ -30,6 +30,7 @@ export function connect(callbacks: {
   socket.onmessage = (e) => {
     try {
       setGameState(JSON.parse(e.data) as GameState);
+      validateFormedUnits();
       ensureDevUnit();
       callbacks.closeMenu();
       callbacks.closeUnitSelect();

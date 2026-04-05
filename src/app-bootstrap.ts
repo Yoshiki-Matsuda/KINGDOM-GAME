@@ -1,5 +1,5 @@
 import { STATE_URL, USE_MOCK_STATE } from "./config";
-import { ensureDevUnit } from "./game/formation";
+import { ensureDevUnit, validateFormedUnits } from "./game/formation";
 import { initMapView } from "./map-view";
 import { connect } from "./network/ws-client";
 import { setGameState } from "./store";
@@ -38,6 +38,7 @@ export async function bootstrapApp(options: BootstrapOptions): Promise<void> {
     const response = await fetch(STATE_URL);
     if (response.ok) {
       setGameState((await response.json()) as GameState);
+      validateFormedUnits();
       ensureDevUnit();
       options.render();
     }

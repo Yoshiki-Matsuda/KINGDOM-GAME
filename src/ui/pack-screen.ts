@@ -1,5 +1,5 @@
 /**
- * カードパック画面（ガチャ/カードドロー）
+ * 魔獣パック画面（ガチャ／ドロー）
  */
 
 import { setCurrentScreen, render } from "../store";
@@ -24,12 +24,12 @@ export function renderPack(): void {
 
   packEl.innerHTML = `
     <div class="sub-screen-header">
-      <h2>🃏 カードパック</h2>
+      <h2>🃏 魔獣パック</h2>
     </div>
     <div class="sub-screen-content">
-      <div class="sub-screen-empty">カードパック機能は準備中です</div>
+      <div class="sub-screen-empty">魔獣パック機能は準備中です</div>
       <div class="pack-info">
-        <p>戦闘でドロップしたカードやフリマで購入したカードが使えます。</p>
+        <p>戦闘でドロップした魔獣やフリマで購入した魔獣が使えます。</p>
       </div>
     </div>
   `;

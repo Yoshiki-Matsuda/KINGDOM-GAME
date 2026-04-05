@@ -72,8 +72,8 @@ export function renderStatus(): void {
         }
       </div>
       <div class="status-section">
-        <h3>所持カード</h3>
-        <div class="status-row">カード枚数: ${ownedCards.length}</div>
+        <h3>所持魔獣</h3>
+        <div class="status-row">魔獣枠数: ${ownedCards.length}</div>
       </div>
       <div class="status-section">
         <h3>探索</h3>

@@ -1,5 +1,5 @@
 /**
- * フリーマーケット画面 — カード・アイテム・資源をゴールドで売買
+ * フリーマーケット画面 — 魔獣・アイテム・資源をゴールドで売買
  */
 
 import { gameState, ws, render, setCurrentScreen } from "../store";
@@ -62,7 +62,7 @@ function sendMarketAction(action: Action): void {
 function describeItem(item: MarketItemType): string {
   switch (item.type) {
     case "card":
-      return `[カード] ${getBodyDisplayName(item.card_id)}`;
+      return `[魔獣] ${getBodyDisplayName(item.card_id)}`;
     case "item": {
       const def = getItem(item.item_id);
       return `${def?.icon ?? ""} ${def?.name ?? item.item_id} x${item.count}`;
@@ -140,7 +140,7 @@ function renderSellTab(): void {
       <div class="sell-section">
         <h3>出品種別</h3>
         <select class="sell-type-select">
-          <option value="card">カード</option>
+          <option value="card">魔獣</option>
           <option value="item">アイテム</option>
           <option value="resource">資源</option>
         </select>
@@ -178,7 +178,7 @@ function renderSellTab(): void {
 
     if (type === "card") {
       if (ownedCards.length === 0) {
-        targetSelect.innerHTML = `<option value="">カードがありません</option>`;
+        targetSelect.innerHTML = `<option value="">出品できる魔獣がありません</option>`;
         return;
       }
       for (const cardId of ownedCards) {
@@ -247,7 +247,7 @@ function renderSellTab(): void {
 
     if (type === "card") {
       const cardId = parseInt(targetSelect.value, 10);
-      if (isNaN(cardId)) { alert("カードを選択してください"); return; }
+      if (isNaN(cardId)) { alert("魔獣を選択してください"); return; }
       item = { type: "card", card_id: cardId };
     } else if (type === "item") {
       const itemId = targetSelect.value;

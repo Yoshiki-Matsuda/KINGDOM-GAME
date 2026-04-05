@@ -188,7 +188,7 @@ export const ITEMS: Record<string, ItemDef> = {
   exp_crystal: {
     id: "exp_crystal",
     name: "経験値の結晶",
-    description: "カードの成長に使用できる結晶。",
+    description: "魔獣の成長に使用できる結晶。",
     rarity: "uncommon",
     category: "special",
     icon: "⭐",
@@ -197,7 +197,7 @@ export const ITEMS: Record<string, ItemDef> = {
   summon_shard: {
     id: "summon_shard",
     name: "召喚の欠片",
-    description: "集めるとカードを召喚できる。",
+    description: "集めると魔獣を召喚できる。",
     rarity: "rare",
     category: "special",
     icon: "🌟",
@@ -216,8 +216,8 @@ export const ITEMS: Record<string, ItemDef> = {
   },
   card_pack_ticket: {
     id: "card_pack_ticket",
-    name: "カードパックチケット",
-    description: "カードショップでノーマルパックを1つ開封できる。",
+    name: "魔獣パックチケット",
+    description: "魔獣ショップでノーマルパックを1つ開封できる。",
     rarity: "uncommon",
     category: "special",
     icon: "🎫",
@@ -226,7 +226,7 @@ export const ITEMS: Record<string, ItemDef> = {
   rare_pack_ticket: {
     id: "rare_pack_ticket",
     name: "レアパックチケット",
-    description: "カードショップでレアパックを1つ開封できる。レア以上確定。",
+    description: "魔獣ショップでレアパックを1つ開封できる。レア以上確定。",
     rarity: "rare",
     category: "special",
     icon: "🎟️",

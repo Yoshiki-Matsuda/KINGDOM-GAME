@@ -1,5 +1,7 @@
-import { formedUnitsList, travelingUnits } from "./store";
+import { formedUnitsList, gameState, travelingUnits, bodyMonsterCounts, bodySpeeds } from "./store";
 import { getBodyDisplayName } from "./game/characters";
+import { isKcUnitReadyToDeploy, recalcUnitStats } from "./game/formation";
+import { getPlayerOwnedCards } from "./shared/game-state";
 import { escapeHtml, formatTimeHHMMSS } from "./utils";
 
 export interface UnitSelectSnapshot {
@@ -10,7 +12,7 @@ export interface UnitSelectSnapshot {
 
 export function getUnitSelectSnapshot(now: number = Date.now()): UnitSelectSnapshot {
   const travelingUnitIds = new Set(travelingUnits.map((traveling) => traveling.unitId));
-  const completeUnits = formedUnitsList.filter((unit) => unit.indices.every((index) => index >= 0));
+  const completeUnits = formedUnitsList.filter((unit) => isKcUnitReadyToDeploy(unit.indices));
   return {
     completeUnits,
     availableUnits: completeUnits.filter((unit) => !travelingUnitIds.has(unit.id)),
@@ -34,11 +36,21 @@ export function renderReturningUnits(container: Element, now: number, units: typ
 
 export function renderAvailableUnits(container: Element, units: typeof formedUnitsList): void {
   container.innerHTML = "";
+  const owned = getPlayerOwnedCards(gameState);
   units.forEach((unit) => {
     const label = document.createElement("label");
     label.className = "unit-select-unit-item";
-    const memberNames = unit.indices.map((index) => getBodyDisplayName(index)).join("・");
-    label.innerHTML = `<input type="radio" name="unit-select-one" data-unit-id="${unit.id}" /> <span>${escapeHtml(unit.name)}（${escapeHtml(memberNames)}） 魔獣数${unit.monster_count} SPEED${unit.avgSpeed.toFixed(1)}</span>`;
+    const memberNames = unit.indices
+      .filter((index) => index >= 0)
+      .map((index) => getBodyDisplayName(owned[index] ?? 0))
+      .join("・");
+    const { monster_count, avgSpeed } = recalcUnitStats(unit.indices, bodyMonsterCounts, bodySpeeds);
+    label.innerHTML = `<input type="radio" name="unit-select-one" data-unit-id="${unit.id}" /> <span>${escapeHtml(unit.name)}（${escapeHtml(memberNames)}） 魔獣数${monster_count} SPEED${avgSpeed.toFixed(1)}</span>`;
     container.appendChild(label);
   });
+  const first = container.querySelector<HTMLInputElement>('input[name="unit-select-one"]');
+  const anyChecked = container.querySelector<HTMLInputElement>('input[name="unit-select-one"]:checked');
+  if (first && !anyChecked) {
+    first.checked = true;
+  }
 }
