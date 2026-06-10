@@ -7,9 +7,11 @@ use argon2::{
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{ensure_player_in_game, GameState};
+use crate::model::{ensure_player_in_game, GameState, TEST_PLAYER_IDS};
 
 const TOKEN_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
+/// フロントの `VITE_DEV_PASSWORD` 既定値と揃える
+const DEFAULT_DEV_AUTH_PASSWORD: &str = "test12345";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AuthUser {
@@ -41,6 +43,32 @@ pub(crate) struct AuthResponse {
     pub(crate) token: String,
     pub(crate) player_id: String,
     pub(crate) username: String,
+}
+
+/// 開発用テストアカウントが未登録なら `data/auth.json` に追加する。
+pub(crate) async fn ensure_dev_auth_users(path: &Path) -> Result<(), String> {
+    let password = std::env::var("DEV_AUTH_PASSWORD").unwrap_or_else(|_| DEFAULT_DEV_AUTH_PASSWORD.to_string());
+    validate_password(&password)?;
+
+    let mut store = load_store(path).await;
+    let mut changed = false;
+    for &username in TEST_PLAYER_IDS {
+        if store.users.iter().any(|user| user.username == username) {
+            continue;
+        }
+        let password_hash = hash_password(&password)?;
+        store.users.push(AuthUser {
+            username: username.to_string(),
+            player_id: username.to_string(),
+            password_hash,
+        });
+        changed = true;
+        println!("[kingdom-server] テスト用アカウントを作成しました: {username}（パスワード: {password}）");
+    }
+    if changed {
+        save_store(path, &store).await?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn load_store(path: &Path) -> AuthStore {

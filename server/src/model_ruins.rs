@@ -1,5 +1,5 @@
 use crate::{
-    model::{generate_neutral_enemies, GameState},
+    model::GameState,
     ruins::generate_ruin,
 };
 
@@ -16,10 +16,9 @@ pub(crate) fn cleanup_expired_ruins(state: &mut GameState) -> bool {
                 if now_ms >= expires_at {
                     territory.ruin = None;
                     territory.owner_id = None;
-                    let (troops, body_monster_counts, body_names) = generate_neutral_enemies(territory.level);
-                    territory.troops = troops;
-                    territory.body_monster_counts = Some(body_monster_counts);
-                    territory.body_names = Some(body_names);
+                    territory.troops = 0;
+                    territory.body_monster_counts = None;
+                    territory.body_names = None;
                     territory.durability = 0;
                     territory.max_durability = 0;
                     changed = true;

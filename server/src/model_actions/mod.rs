@@ -24,6 +24,8 @@ use crate::model::{
     default_now_ms,
     ensure_card_monster_counts,
     generate_neutral_enemies,
+    generate_neutral_enemies_for_territory,
+    resolve_territory_defenders,
     get_territory_index,
     home_territory_id,
     initial_card_monster_counts_for_owned,

@@ -106,17 +106,63 @@ pub(crate) fn ensure_player_in_game(state: &mut GameState, player_id: &str) {
     state.players.insert(player_id.to_string(), player);
 }
 
+fn manhattan_distance(a_id: &str, b_id: &str) -> Option<u16> {
+    let (ac, ar) = parse_territory_id(a_id)?;
+    let (bc, br) = parse_territory_id(b_id)?;
+    Some(
+        (ac as i16 - bc as i16).unsigned_abs() as u16
+            + (ar as i16 - br as i16).unsigned_abs() as u16,
+    )
+}
+
+fn min_distance_to_homes(territory_id: &str, existing_homes: &[String]) -> u16 {
+    existing_homes
+        .iter()
+        .filter_map(|home| manhattan_distance(territory_id, home))
+        .min()
+        .unwrap_or(u16::MAX)
+}
+
 fn allocate_home_territory(territories: &mut [Territory], player_id: &str) -> Option<String> {
-    let territory = territories
-        .iter_mut()
-        .find(|territory| territory.owner_id.is_none() && territory.ruin.is_none())?;
+    let existing_homes: Vec<String> = territories
+        .iter()
+        .filter(|t| t.is_base && t.owner_id.is_some())
+        .map(|t| t.id.clone())
+        .collect();
+
+    let neutral_ids: Vec<String> = territories
+        .iter()
+        .filter(|t| t.owner_id.is_none() && t.ruin.is_none())
+        .map(|t| t.id.clone())
+        .collect();
+
+    let separated: Vec<String> = neutral_ids
+        .iter()
+        .filter(|id| {
+            min_distance_to_homes(id, &existing_homes) >= MIN_HOME_SEPARATION as u16
+        })
+        .cloned()
+        .collect();
+
+    let pool = if separated.is_empty() {
+        neutral_ids
+    } else {
+        separated
+    };
+
+    let chosen_id = pool
+        .into_iter()
+        .max_by_key(|id| min_distance_to_homes(id, &existing_homes))?;
+
+    let idx = get_territory_index(territories, &chosen_id)?;
+    let territory = &mut territories[idx];
     territory.owner_id = Some(player_id.to_string());
     territory.is_base = true;
     territory.durability = 0;
     territory.max_durability = 0;
     territory.tower_level = 0;
     territory.body_names = None;
-    Some(territory.id.clone())
+    Some(chosen_id)
 }
 
 /// この領地に援軍を送れるか（自領・クランメンバー・配下プレイヤーの領）。
@@ -140,28 +186,8 @@ pub(crate) fn territory_name<'a>(territories: &'a [Territory], id: &'a str) -> &
     territories.iter().find(|t| t.id.as_str() == id).map(|t| t.name.as_str()).unwrap_or(id)
 }
 
-pub(crate) fn push_log(log: &mut Vec<String>, line: String) {
-    let ts = default_now_ms();
-    log.push(format!("[ts:{}]{}", ts, line));
-    if log.len() > MAX_LOG_LINES {
-        log.drain(0..log.len() - MAX_LOG_LINES);
-    }
-}
+pub(crate) use crate::game_log::push_log;
 
-/// 旧ログ（[ts:] プレフィックスなし）にタイムスタンプを付与するマイグレーション。
-/// 既存行は起動時刻から逆算して等間隔に並べる。
 pub fn migrate_log_timestamps(state: &mut GameState) {
-    let now = default_now_ms();
-    let total = state.log.len() as u64;
-    if total == 0 { return; }
-    let mut migrated = false;
-    for (i, line) in state.log.iter_mut().enumerate() {
-        if line.starts_with("[ts:") { continue; }
-        let synthetic_ts = now.saturating_sub((total - i as u64) * 500);
-        *line = format!("[ts:{}]{}", synthetic_ts, line);
-        migrated = true;
-    }
-    if migrated {
-        println!("[kingdom-server] 旧ログ {} 件にタイムスタンプを付与しました", total);
-    }
+    crate::game_log::migrate_log_timestamps(&mut state.log);
 }

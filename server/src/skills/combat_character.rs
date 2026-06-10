@@ -269,11 +269,11 @@ impl CombatCharacter {
             match effect {
                 StatusEffect::Poison { damage, .. } => {
                     damage_taken += damage;
-                    log.push(format!("  {}が毒で{:.0}ダメージ！", self.name, damage));
+                    crate::game_log::push_log(log, format!("  {}が毒で {:.0} ダメージ！", self.name, damage));
                 }
                 StatusEffect::Burn { damage, .. } => {
                     damage_taken += damage;
-                    log.push(format!("  {}が炎上で{:.0}ダメージ！", self.name, damage));
+                    crate::game_log::push_log(log, format!("  {}が炎上で {:.0} ダメージ！", self.name, damage));
                 }
                 _ => {}
             }
@@ -283,7 +283,7 @@ impl CombatCharacter {
             self.current_monster_count -= damage_taken;
             if self.current_monster_count <= 0.0 {
                 self.is_alive = false;
-                log.push(format!("  {}が状態異常で倒れた！", self.name));
+                crate::game_log::push_log(log, format!("  {}が状態異常で倒れた！", self.name));
             }
         }
 

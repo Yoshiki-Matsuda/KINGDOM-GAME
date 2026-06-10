@@ -16,6 +16,9 @@ serde_json = "1"
 
 # ワイプ／新規ゲーム時のランダム地形
 rand = "0.8"
+futures-util = "0.3"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = "0.24"
 argon2 = "0.5.3"
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["rust_crypto"] }
 time = "0.3.47"

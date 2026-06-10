@@ -89,7 +89,12 @@ export function showMenuAt(x: number, y: number, territoryId: string, territory:
       menuEl.innerHTML = renderOwnedTerritoryMenu(territoryId, t);
     } else {
       const attackable = isAttackable(gameState, territoryId);
-      menuEl.innerHTML = renderNeutralTerritoryMenu(territoryId, t, attackable);
+      menuEl.innerHTML = renderNeutralTerritoryMenu(
+        territoryId,
+        t,
+        attackable,
+        gameState.players,
+      );
     }
   }
 

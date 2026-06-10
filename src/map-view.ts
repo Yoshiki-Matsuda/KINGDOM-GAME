@@ -14,6 +14,7 @@ import {
     GRID_ROWS,
     formatTerritoryId,
     getPlayerHomeTerritoryId,
+    isEnemyHomeTile,
     isPlayerHomeTile,
     isWithinWorldGrid,
     tryParseTerritoryId,
@@ -435,7 +436,9 @@ function redrawTerrain() {
             continue;
         }
 
-        const isHome = isPlayerHomeTile(id, t, playerId, _localHomeTerritoryId);
+        const isOwnHome = isPlayerHomeTile(id, t, playerId, _localHomeTerritoryId);
+        const isEnemyHome = isEnemyHomeTile(id, t, playerId, gameState);
+        const useCastleIcon = isOwnHome || isEnemyHome;
         let color = 0x4a4838;
         if (t) {
             if (t.owner_id === playerId) color = 0x2a3a5a;
@@ -443,7 +446,7 @@ function redrawTerrain() {
             else color = terrainColor(level);
         }
 
-        const tex = isHome ? CASTLE_TEXTURE : TERRAIN_TEXTURES[level];
+        const tex = useCastleIcon ? CASTLE_TEXTURE : TERRAIN_TEXTURES[level];
         if (tex) {
             g.poly(points, true).fill({ texture: tex, textureSpace: "local" });
         } else {

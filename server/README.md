@@ -22,6 +22,7 @@ cargo run
   DEV_AUTO_WIN=1 cargo run
   ```
 
+- **開発用敵BOT**: `DEV_BOT=1 cargo run` で `player` アカウントが既存の `/auth/login` → `/ws` 経由で自動攻撃（対象は既定 `offline_test`）。専用APIは追加しない。
 - 起動後: `http://127.0.0.1:3000/health` でヘルスチェック
 - `http://127.0.0.1:3000/api` で API 情報
 - `http://127.0.0.1:3000/api/state` でゲーム状態（JSON）

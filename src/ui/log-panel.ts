@@ -119,6 +119,20 @@ function parseLogLine(raw: string): { text: string; tsMs: number | null } {
   return { text: raw, tsMs: null };
 }
 
+/** 侵攻開始行の [p:player_id]（攻撃実行者）を除去 */
+function parseActorPrefix(text: string): { actorId: string | null; text: string } {
+  const m = text.match(/^\[p:([^\]]+)\]/);
+  if (m) {
+    return { actorId: m[1], text: text.slice(m[0].length) };
+  }
+  return { actorId: null, text };
+}
+
+function isOwnBattleActor(actorId: string | null): boolean {
+  if (!actorId) return true;
+  return actorId === getLocalPlayerId();
+}
+
 function classifyLog(line: string): LogType {
   if (line.startsWith("◆◆") || line.includes("固有スキル")) return "skill_unique";
   if (line.startsWith("◆") || line.startsWith("★")) return "skill_passive";
@@ -182,6 +196,8 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
   let currentAction: ActionGroup | null = null;
   let battleId = 0;
   let postBattleLootMode = false;
+  /** 他プレイヤーの戦闘ログを読み飛ばす */
+  let skippingBattle = false;
   /** 現在の戦闘グループの基準タイムスタンプ */
   let currentBattleTsMs: number | null = null;
   const playerUnitNames = buildPlayerUnitNames();
@@ -197,12 +213,27 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
     currentBattleTsMs = null;
   }
 
+  let lastTsMs: number | null = null;
   for (let lineIdx = 0; lineIdx < rawLogs.length; lineIdx++) {
-    const { text: line, tsMs } = parseLogLine(rawLogs[lineIdx]);
+    const parsed = parseLogLine(rawLogs[lineIdx]);
+    const { actorId, text: lineBody } = parseActorPrefix(parsed.text);
+    const line = lineBody;
+    const tsMs = parsed.tsMs ?? lastTsMs;
+    if (parsed.tsMs != null) lastTsMs = parsed.tsMs;
     if (isHiddenBattleDelimiter(line)) {
       continue;
     }
     const type = classifyLog(line);
+
+    if (type === "battle_start") {
+      skippingBattle = !isOwnBattleActor(actorId);
+      if (skippingBattle) {
+        postBattleLootMode = false;
+        continue;
+      }
+    } else if (skippingBattle) {
+      continue;
+    }
 
     if (postBattleLootMode && currentBattle && !isLootRelatedLine(line) && type !== "battle_start") {
       finalizeCurrent();

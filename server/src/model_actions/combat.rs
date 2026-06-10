@@ -574,7 +574,7 @@ fn compute_net_attack_damage(
     if attack_mods.percent_damage > 0.0 {
         let percent_dmg = defender.current_monster_count * attack_mods.percent_damage;
         raw_damage += percent_dmg;
-        push_log(log, format!("割合ダメージ+{:.0}", percent_dmg));
+        push_log(log, format!("+{:.0} 割合ダメージ", percent_dmg));
     }
 
     let vulnerability = defender.get_vulnerability();
@@ -831,12 +831,12 @@ fn resolve_attack_outcome(
 
         if attack_mods.monster_steal > 0.0 {
             teams[0][actor_idx].current_monster_count += attack_mods.monster_steal;
-            push_log(log, format!("{}が{:.0}魔獣数を奪取！", atk_name, attack_mods.monster_steal));
+            push_log(log, format!("{}が {:.0} 魔獣数を奪取！", atk_name, attack_mods.monster_steal));
         }
         if attack_mods.absorb_rate > 0.0 {
             let absorb = damage_after_shield * attack_mods.absorb_rate;
             teams[0][actor_idx].current_monster_count += absorb;
-            push_log(log, format!("{}が{:.0}魔獣数を吸収！", atk_name, absorb));
+            push_log(log, format!("{}が {:.0} 魔獣数を吸収！", atk_name, absorb));
         }
         if attack_mods.extra_attacks > 0 {
             teams[0][actor_idx].extra_attacks += attack_mods.extra_attacks;
@@ -850,7 +850,7 @@ fn resolve_attack_outcome(
         if reflect_rate > 0.0 {
             let reflect_damage = net_damage * reflect_rate;
             teams[0][actor_idx].current_monster_count -= reflect_damage;
-            push_log(log, format!("{}の反射で{:.0}ダメージ！", def_name, reflect_damage));
+            push_log(log, format!("{}の反射で {:.0} ダメージ！", def_name, reflect_damage));
             if teams[0][actor_idx].current_monster_count <= 0.0 {
                 teams[0][actor_idx].is_alive = false;
                 if !(actor_is_player && check_death_skills(&mut teams[0][actor_idx], log)) {
@@ -887,7 +887,7 @@ fn resolve_attack_outcome(
             };
             let counter_dmg = counter_raw.clamp(cl, ch);
             teams[0][actor_idx].current_monster_count -= counter_dmg;
-            push_log(log, format!("{}の反撃！{:.0}ダメージ！", def_name, counter_dmg));
+            push_log(log, format!("{}の反撃！ {:.0} ダメージ！", def_name, counter_dmg));
             if teams[0][actor_idx].current_monster_count <= 0.0 {
                 teams[0][actor_idx].is_alive = false;
                 if !(actor_is_player && check_death_skills(&mut teams[0][actor_idx], log)) {
@@ -1006,7 +1006,7 @@ fn perform_actor_turn(
     push_log(
         log,
         format!(
-            "{} {}が{}に攻撃！（ダメージ{:.0}）",
+            "{} {}が{}に攻撃！（{:.0} ダメージ）",
             crate::skills::side_label(actor_is_player),
             atk_name,
             def_name,
@@ -1254,7 +1254,7 @@ pub(super) fn apply_attack_action(
 
     let from_name = territory_name(&territories, from_territory_id).to_string();
     let to_name = territory_name(&territories, to_territory_id).to_string();
-    let to_troops = territories[to_idx].troops;
+    let defender_territory_id = territories[to_idx].id.clone();
 
     // 強化魔獣(★)判定のため、このユニットの各スロットに対応する owned_cards インデックスを保持
     let enhanced_flags: Vec<bool> = match owned_card_indices.as_ref() {
@@ -1291,16 +1291,8 @@ pub(super) fn apply_attack_action(
     );
     assign_positions(&mut our_chars);
 
-    let enemy_monster_counts: Vec<u32> = territories[to_idx]
-        .body_monster_counts
-        .clone()
-        .filter(|values| values.len() == to_troops as usize)
-        .unwrap_or_else(|| vec![1u32; to_troops as usize]);
-    let enemy_names: Vec<String> = territories[to_idx]
-        .body_names
-        .clone()
-        .filter(|values| values.len() == to_troops as usize)
-        .unwrap_or_else(|| (1..=to_troops as usize).map(|i| format!("敵ユニット{}", i)).collect());
+    let (_defender_troops, enemy_monster_counts, enemy_names) =
+        resolve_territory_defenders(&territories[to_idx]);
 
     let mut enemy_chars: Vec<CombatCharacter> = enemy_names
         .iter()
@@ -1318,7 +1310,10 @@ pub(super) fn apply_attack_action(
         .unwrap_or_default();
     push_log(
         log,
-        format!("【{}{}侵攻戦】{}が{}へ侵攻開始", to_name, coords_str, attacker_label, to_name),
+        format!(
+            "[p:{actor_player_id}]【{}{}侵攻戦】{}が{}へ侵攻開始",
+            to_name, coords_str, attacker_label, to_name
+        ),
     );
 
     let total_waves = if territories[to_idx].ruin.is_some() {
@@ -1331,7 +1326,9 @@ pub(super) fn apply_attack_action(
     if wave > 1 {
         if !our_chars.iter().any(|c| c.is_alive) { break 'waves; }
         let level = territories[to_idx].level;
-        let (_cnt, monster_counts, names) = generate_neutral_enemies(level);
+        let wave_seed = format!("{defender_territory_id}:wave{wave}");
+        let (_cnt, monster_counts, names) =
+            generate_neutral_enemies_for_territory(level, &wave_seed);
         enemy_chars.clear();
         let enemy_names_wave: Vec<String> = names;
         let enemy_monster_counts_wave: Vec<u32> = monster_counts;

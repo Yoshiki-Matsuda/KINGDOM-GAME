@@ -1,5 +1,11 @@
 use super::*;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
+
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
+use rand::{Rng, SeedableRng};
 
 /// グリッドサイズ（クライアントの GRID_COLS / GRID_ROWS と一致）
 pub(crate) const GRID_COLS: u8 = 48;
@@ -88,21 +94,23 @@ fn neutral_card_pool_for_level(level: u8) -> &'static [u32] {
     }
 }
 
-fn pick_distinct_neutral_cards(pool: &[u32], count: usize) -> Vec<u32> {
+fn hash_seed(key: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn pick_distinct_neutral_cards(pool: &[u32], count: usize, rng: &mut impl Rng) -> Vec<u32> {
     let mut ids: Vec<u32> = pool.to_vec();
     ids.sort_unstable();
     ids.dedup();
-    use rand::seq::SliceRandom;
-    let mut rng = rand::thread_rng();
-    ids.shuffle(&mut rng);
+    ids.shuffle(rng);
     ids.truncate(count.min(ids.len()));
     ids
 }
 
-/// 全マスを領地として生成。id は c_{col}_{row}。本拠地 (24,24) のみプレイヤー所有。地形はランダム。
-/// レベルに応じた中立地の敵を生成（魔獣マスタ定義を使用。1ユニット最大3種・同種不可）
-pub(crate) fn generate_neutral_enemies(level: u8) -> (u32, Vec<u32>, Vec<String>) {
-    let (count, mc_per_body): (u32, u32) = match level {
+fn neutral_enemy_stats(level: u8) -> (u32, u32) {
+    match level {
         1 => (1, 50),
         2 => (1, 250),
         3 => (2, 250),
@@ -113,8 +121,15 @@ pub(crate) fn generate_neutral_enemies(level: u8) -> (u32, Vec<u32>, Vec<String>
         8 => (3, 8500),
         9 => (3, 9000),
         _ => (3, 9000),
-    };
-    let card_ids = pick_distinct_neutral_cards(neutral_card_pool_for_level(level), count as usize);
+    }
+}
+
+/// 領地Lvとシードキーから中立敵を決定的に生成（未触の中立マスは state に保存しない）
+pub(crate) fn generate_neutral_enemies_for_territory(level: u8, seed_key: &str) -> (u32, Vec<u32>, Vec<String>) {
+    let (count, mc_per_body) = neutral_enemy_stats(level);
+    let mut rng = StdRng::seed_from_u64(hash_seed(seed_key));
+    let card_ids =
+        pick_distinct_neutral_cards(neutral_card_pool_for_level(level), count as usize, &mut rng);
     let troops = card_ids.len() as u32;
     let monster_counts = vec![mc_per_body; card_ids.len()];
     let names: Vec<String> = card_ids
@@ -126,6 +141,34 @@ pub(crate) fn generate_neutral_enemies(level: u8) -> (u32, Vec<u32>, Vec<String>
         })
         .collect();
     (troops, monster_counts, names)
+}
+
+/// 連戦などシード不要な場面向け（従来互換）
+pub(crate) fn generate_neutral_enemies(level: u8) -> (u32, Vec<u32>, Vec<String>) {
+    generate_neutral_enemies_for_territory(level, &format!("ephemeral:{level}"))
+}
+
+/// 戦闘時の守備編成を解決。プレイヤー駐留・遺跡・攻撃後の残存のみ state を参照する。
+pub(crate) fn resolve_territory_defenders(territory: &Territory) -> (u32, Vec<u32>, Vec<String>) {
+    if territory.owner_id.is_some() || territory.ruin.is_some() || territory.body_names.is_some() {
+        let troops = territory.troops;
+        let counts = territory
+            .body_monster_counts
+            .clone()
+            .filter(|values| values.len() == troops as usize)
+            .unwrap_or_else(|| vec![1u32; troops.max(1) as usize]);
+        let names = territory
+            .body_names
+            .clone()
+            .filter(|values| values.len() == troops as usize)
+            .unwrap_or_else(|| {
+                (1..=troops.max(1))
+                    .map(|i| format!("敵ユニット{i}"))
+                    .collect()
+            });
+        return (troops, counts, names);
+    }
+    generate_neutral_enemies_for_territory(territory.level, &territory.id)
 }
 
 fn enemy_name_species_key(name: &str) -> &str {
@@ -153,32 +196,54 @@ fn neutral_enemy_names_need_refresh(names: &[String]) -> bool {
     false
 }
 
-/// 保存済み state の中立領地で、旧 ABC 複製編成を現行ルール（最大3種・同種不可）に差し替える
-pub fn migrate_legacy_neutral_enemies(state: &mut GameState) -> bool {
-    let mut fixed = 0usize;
+/// 未触の中立マスから敵編成の永続データを除去（Lv + マスID から都度生成する）
+pub fn migrate_neutral_enemy_storage(state: &mut GameState) -> bool {
+    let mut stripped = 0usize;
+    let mut fixed_legacy = 0usize;
     for territory in state.territories.iter_mut() {
         if territory.owner_id.is_some() || territory.is_base {
             continue;
         }
-        let Some(names) = territory.body_names.clone() else {
-            continue;
-        };
-        if !neutral_enemy_names_need_refresh(&names) {
+        if territory.ruin.is_some() {
             continue;
         }
-        let (troops, body_monster_counts, body_names) = generate_neutral_enemies(territory.level);
-        territory.troops = troops;
-        territory.body_monster_counts = Some(body_monster_counts);
-        territory.body_names = Some(body_names);
-        fixed += 1;
+        if let Some(names) = territory.body_names.clone() {
+            if neutral_enemy_names_need_refresh(&names) {
+                let (troops, body_monster_counts, body_names) =
+                    generate_neutral_enemies_for_territory(territory.level, &territory.id);
+                territory.troops = troops;
+                territory.body_monster_counts = Some(body_monster_counts);
+                territory.body_names = Some(body_names);
+                fixed_legacy += 1;
+            }
+            continue;
+        }
+        if territory.troops != 0
+            || territory.body_monster_counts.is_some()
+            || territory.body_names.is_some()
+        {
+            territory.troops = 0;
+            territory.body_monster_counts = None;
+            territory.body_names = None;
+            stripped += 1;
+        }
     }
-    if fixed > 0 {
+    if stripped > 0 {
         println!(
-            "[kingdom-server] 中立敵の旧編成（同一種ABC）を {} 領地で更新しました",
-            fixed
+            "[kingdom-server] 未触中立マス {stripped} 件の敵編成を state から除去しました"
         );
     }
-    fixed > 0
+    if fixed_legacy > 0 {
+        println!(
+            "[kingdom-server] 攻撃済み中立マスの旧編成（同一種ABC）を {fixed_legacy} 件更新しました"
+        );
+    }
+    stripped > 0 || fixed_legacy > 0
+}
+
+/// 後方互換エイリアス
+pub fn migrate_legacy_neutral_enemies(state: &mut GameState) -> bool {
+    migrate_neutral_enemy_storage(state)
 }
 
 #[cfg(test)]
@@ -205,21 +270,34 @@ mod tests {
         assert!(!neutral_enemy_names_need_refresh(&names));
     }
 
-    /// 開発用: `server/data/state.json` があれば起動マイグレーションと同じ処理を適用して保存する
     #[test]
-    fn migrate_dev_state_json_if_present() {
-        let path = std::path::Path::new("data/state.json");
-        if !path.exists() {
-            return;
-        }
-        let raw = std::fs::read_to_string(path).expect("read state.json");
-        let mut state: GameState = serde_json::from_str(&raw).expect("parse state.json");
-        let changed = migrate_legacy_neutral_enemies(&mut state);
-        if !changed {
-            return;
-        }
-        let out = serde_json::to_string_pretty(&state).expect("serialize state");
-        std::fs::write(path, out).expect("write state.json");
+    fn neutral_enemies_are_deterministic_per_territory() {
+        let a = generate_neutral_enemies_for_territory(5, "c_2_3");
+        let b = generate_neutral_enemies_for_territory(5, "c_2_3");
+        assert_eq!(a, b);
+        let c = generate_neutral_enemies_for_territory(5, "c_2_4");
+        assert_ne!(a.2, c.2);
+    }
+
+    #[test]
+    fn resolve_procedural_neutral_without_storage() {
+        let territory = Territory {
+            id: "c_3_4".to_string(),
+            name: "森".to_string(),
+            level: 3,
+            owner_id: None,
+            troops: 0,
+            body_monster_counts: None,
+            body_names: None,
+            ruin: None,
+            is_base: false,
+            durability: 0,
+            max_durability: 0,
+            tower_level: 0,
+        };
+        let (troops, _, names) = resolve_territory_defenders(&territory);
+        assert!(troops > 0);
+        assert!(!names.is_empty());
     }
 }
 
@@ -253,16 +331,15 @@ pub(super) fn default_territories() -> Vec<Territory> {
                     tower_level: 0,
                 });
             } else {
-                // 中立マス: レベルに応じた敵を配置。耐久なし＝戦闘勝利で即占領（PvP拠点のみ耐久を使う）
-                let (troops, body_monster_counts, body_names) = generate_neutral_enemies(level);
+                // 中立マス: 敵編成は Lv + マスID から戦闘時に生成（state には level のみ保持）
                 out.push(Territory {
                     id,
                     name,
                     level,
                     owner_id: None,
-                    troops,
-                    body_monster_counts: Some(body_monster_counts),
-                    body_names: Some(body_names),
+                    troops: 0,
+                    body_monster_counts: None,
+                    body_names: None,
                     ruin: None,
                     is_base: false,
                     durability: 0,

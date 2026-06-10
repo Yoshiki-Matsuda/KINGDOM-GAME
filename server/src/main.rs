@@ -6,6 +6,8 @@
 
 mod app_state;
 mod auth;
+mod dev_bot;
+mod game_log;
 mod cards;
 mod facilities;
 mod http_api;
@@ -24,7 +26,7 @@ use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use app_state::AppState;
-use model::{cleanup_expired_ruins, GameState};
+use model::{cleanup_expired_ruins, ensure_player_in_game, GameState, TEST_PLAYER_IDS};
 use persistence::{load_state, save_state, state_path};
 use ruin_scheduler::spawn_ruin_scheduler;
 
@@ -49,8 +51,17 @@ async fn main() {
 
     model::migrate_log_timestamps(&mut game);
     model::migrate_legacy_neutral_enemies(&mut game);
+    for &player_id in TEST_PLAYER_IDS {
+        ensure_player_in_game(&mut game, player_id);
+    }
     model::refresh_all_test_players(&mut game);
+
     let _ = save_state(&state_path, &game).await;
+
+    if let Err(e) = auth::ensure_dev_auth_users(&auth_path).await {
+        eprintln!("[kingdom-server] テスト用アカウントの初期化に失敗: {e}");
+        std::process::exit(1);
+    }
 
     // 起動時に期限切れの遺跡をクリーンアップ
     if cleanup_expired_ruins(&mut game) {
@@ -62,7 +73,9 @@ async fn main() {
         .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
         .unwrap_or(false);
     if dev_auto_win {
-        println!("[kingdom-server] DEV_AUTO_WIN=1: 攻撃側10倍有利（ローカル開発モード）");
+        println!(
+            "[kingdom-server] DEV_AUTO_WIN=1: 攻撃側10倍有利 + 敵BOT（player）が既存WS経由で自動攻撃"
+        );
     }
 
     // 戦闘処理中にブロードキャストが留まりすぎると RecvError::Lagged になるため余裕を持たせる
@@ -114,10 +127,10 @@ async fn main() {
         port
     );
     println!(
-        "  テスト用アカウント: offline_test / player（魔獣10体・各9999・スタミナ満タン）"
+        "  テスト用アカウント: offline_test（人間）/ player（敵BOT）パスワード test12345"
     );
     println!(
-    "      $env:DEV_AUTO_WIN="1"; cargo run"
+        "  ローカル開発: DEV_AUTO_WIN=1 cargo run（攻撃有利+敵BOT自動起動）/ BOTのみ: DEV_BOT=1 cargo run"
     );
     println!("  GET /ws          -> WebSocket（状態配信・行動受付）");
     println!("  行動例: 送信 {{\"action\":\"end_turn\"}} でターン進行");
@@ -135,5 +148,17 @@ async fn main() {
         }
         Err(e) => panic!("bind: {e}"),
     };
+
+    if let Some(bot_config) = dev_bot::DevBotConfig::from_env(port) {
+        println!(
+            "  敵BOT: {} → {}（既存 /auth/login + /ws）",
+            bot_config.username, bot_config.target_player
+        );
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            dev_bot::run(bot_config).await;
+        });
+    }
+
     axum::serve(listener, app).await.expect("serve");
 }

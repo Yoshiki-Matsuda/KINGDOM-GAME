@@ -1,3 +1,4 @@
+import { isEnemyHomeTile } from "./game/territories";
 import type { Territory } from "./store";
 import { getLocalPlayerId } from "./store";
 
@@ -52,14 +53,32 @@ export function renderOwnedTerritoryMenu(
   `;
 }
 
+function formatTerritoryMenuInfo(
+  territoryId: string,
+  territory: Territory,
+  localPlayerId: string,
+  players: Record<string, { home_territory_id: string }>,
+): string {
+  if (
+    territory.owner_id
+    && isEnemyHomeTile(territoryId, territory, localPlayerId, { players })
+  ) {
+    return territory.owner_id;
+  }
+  const statusText = territory.owner_id ? "敵占領" : "中立";
+  return `Lv.${territory.level} ${territory.name}（${statusText}）`;
+}
+
 export function renderNeutralTerritoryMenu(
   territoryId: string,
   territory: Territory,
   attackable: boolean,
+  players: Record<string, { home_territory_id: string }>,
+  localPlayerId: string = getLocalPlayerId(),
 ): string {
-  const statusText = territory.owner_id ? "敵占領" : "中立";
+  const info = formatTerritoryMenuInfo(territoryId, territory, localPlayerId, players);
   return `
-    <div class="context-menu-info">Lv.${territory.level} ${territory.name}（${statusText}）</div>
+    <div class="context-menu-info">${info}</div>
     ${attackable ? `<button type="button" data-action="attack" data-to="${territoryId}">攻撃</button>` : ""}
   `;
 }

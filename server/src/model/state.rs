@@ -19,8 +19,6 @@ pub(crate) fn build_game_state(
     }
 }
 
-pub(crate) const MAX_LOG_LINES: usize = 2000;
-
 impl Default for GameState {
     fn default() -> Self {
         let home_territory_id = format!("c_{}_{}", HOME_COL, HOME_ROW);

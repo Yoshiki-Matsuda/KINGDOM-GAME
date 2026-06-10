@@ -7,6 +7,9 @@ pub const DEFAULT_PLAYER_ID: &str = "player";
 pub const HOME_COL: u8 = 24;
 pub const HOME_ROW: u8 = 24;
 
+/// 新規参加プレイヤーの本拠は、既存プレイヤー本拠からこのマンハッタン距離以上離す。
+pub(crate) const MIN_HOME_SEPARATION: u8 = 8;
+
 /// 所持魔獣1枠あたりの魔獣数の共通下限（戦闘で0になっても1に戻す）
 pub const MIN_MONSTER_COUNT_PER_CARD_SLOT: u32 = 1;
 

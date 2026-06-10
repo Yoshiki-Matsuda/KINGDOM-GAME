@@ -87,3 +87,15 @@ export function isPlayerHomeTile(
   if (territoryId === homeTerritoryId) return true;
   return territory?.owner_id === playerId && territory.is_base === true;
 }
+
+/** 他プレイヤーの本拠地（占領した中立マス・前線基地と区別する） */
+export function isEnemyHomeTile(
+  territoryId: string,
+  territory: { owner_id?: string | null; is_base?: boolean } | undefined,
+  localPlayerId: string,
+  state: HomeLookupState,
+): boolean {
+  const owner = territory?.owner_id;
+  if (!owner || owner === localPlayerId || owner === "barbarian") return false;
+  return territoryId === getPlayerHomeTerritoryId(state, owner);
+}
