@@ -8,22 +8,22 @@ import {
   MAX_MONSTER_COUNT_PER_CARD_SLOT,
   MIN_MONSTER_COUNT_PER_CARD_SLOT,
 } from "./shared/game-state";
-import { gameState } from "./store";
+import { gameState, getLocalPlayerId } from "./store";
 import { escapeHtml } from "./utils";
 
 /** `bodySlot`: 本拠の体インデックス（`owned_cards` の添字と一致） */
 export function buildFormationCardDetailHtml(bodySlot: number): string {
-  const owned = getPlayerOwnedCards(gameState);
+  const owned = getPlayerOwnedCards(gameState, getLocalPlayerId());
   const cardId = owned[bodySlot] ?? bodySlot;
   const stats = getCharacterStats(cardId);
   const skills = getCharacterSkills(cardId);
-  const counts = getPlayerCardMonsterCounts(gameState);
+  const counts = getPlayerCardMonsterCounts(gameState, getLocalPlayerId());
   const currentMc = Math.min(
     Math.max(counts[bodySlot] ?? stats.monster_count, MIN_MONSTER_COUNT_PER_CARD_SLOT),
     MAX_MONSTER_COUNT_PER_CARD_SLOT
   );
   const roomToCap = MAX_MONSTER_COUNT_PER_CARD_SLOT - currentMc;
-  const food = getPlayerFood(gameState);
+  const food = getPlayerFood(gameState, getLocalPlayerId());
   const maxByFood =
     FOOD_PER_MONSTER_PRODUCE > 0 ? Math.floor(food / FOOD_PER_MONSTER_PRODUCE) : 0;
   const maxProduce = Math.max(0, Math.min(roomToCap, maxByFood));

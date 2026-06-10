@@ -3,6 +3,7 @@ import type { FormedUnit, TravelingUnit } from "./store";
 import {
   formedUnitsList,
   gameState,
+  getLocalPlayerId,
   setFormedUnitsList,
   setGameState,
   setTravelingUnits,
@@ -25,9 +26,23 @@ export function replaceLocalPlayerState(update: {
   inventory?: InventoryItem[];
   facilities?: BuiltFacility[];
 }): void {
+  const playerId = getLocalPlayerId();
+  const player = gameState.players[playerId];
+  const nextPlayers = {
+    ...gameState.players,
+    ...(player
+      ? {
+          [playerId]: {
+            ...player,
+            ...(update.inventory !== undefined ? { inventory: update.inventory } : {}),
+            ...(update.facilities !== undefined ? { facilities: update.facilities } : {}),
+          },
+        }
+      : {}),
+  };
+
   setGameState({
     ...gameState,
-    ...(update.inventory !== undefined ? { inventory: update.inventory } : {}),
-    ...(update.facilities !== undefined ? { facilities: update.facilities } : {}),
+    players: nextPlayers,
   });
 }

@@ -2,7 +2,9 @@
  * 戦闘履歴パネル（グループ化された履歴表示）
  */
 
-import { gameState } from "../store";
+import { getBodyDisplayName } from "../game/characters";
+import { getPlayerOwnedCards } from "../shared/game-state";
+import { gameState, getLocalPlayerId } from "../store";
 import { escapeHtml } from "../utils";
 
 let historyList: HTMLDivElement;
@@ -29,6 +31,83 @@ interface ActionGroup {
   title: string;
   icon: string;
   lines: string[];
+  side?: "ally" | "enemy";
+}
+
+function detectLogSide(line: string): "ally" | "enemy" | undefined {
+  if (line.includes("[味方]")) return "ally";
+  if (line.includes("[敵]")) return "enemy";
+  return undefined;
+}
+
+function buildPlayerUnitNames(): Set<string> {
+  const names = new Set<string>();
+  for (const cardIdx of getPlayerOwnedCards(gameState, getLocalPlayerId())) {
+    names.add(getBodyDisplayName(cardIdx));
+  }
+  return names;
+}
+
+function parseSkillCharacterName(line: string): string {
+  const m = line.match(/^[◆★]*\s*(?:\[味方\]\s*|\[敵\]\s*)?(.+?)の/);
+  return m?.[1] ?? "";
+}
+
+function parseAttackAttackerName(line: string): string {
+  const m = line.match(/^(?:\[味方\]\s*|\[敵\]\s*)?(.+?)が.+?に攻撃/);
+  return m?.[1] ?? "";
+}
+
+function resolveActionSide(
+  line: string,
+  actorName: string,
+  characterSides: Map<string, "ally" | "enemy">,
+  playerUnitNames: Set<string>,
+): "ally" | "enemy" | undefined {
+  const tagged = detectLogSide(line);
+  if (tagged) {
+    if (actorName) characterSides.set(actorName, tagged);
+    return tagged;
+  }
+  if (actorName) {
+    const known = characterSides.get(actorName);
+    if (known) return known;
+    if (actorName.startsWith("味方ユニット")) return "ally";
+    if (actorName.startsWith("敵ユニット")) return "enemy";
+    if (playerUnitNames.has(actorName)) return "ally";
+  }
+  return undefined;
+}
+
+function actionSideClass(action: ActionGroup): string {
+  if (!action.side) return "";
+  if (action.type === "skill" || action.type === "attack") {
+    return ` action-${action.type}-${action.side}`;
+  }
+  return "";
+}
+
+function actionSideBadge(action: ActionGroup): string {
+  if (!action.side || (action.type !== "skill" && action.type !== "attack")) return "";
+  const label = action.side === "ally" ? "味方" : "敵";
+  return `<span class="action-side-badge action-side-${action.side}">${label}</span>`;
+}
+
+/** サーバー内部用のフェーズ区切り（ユーザー向けログには出さない） */
+function isHiddenBattleDelimiter(line: string): boolean {
+  if (line.startsWith("--- 戦利品 ---") || line.startsWith("--- 魔獣入手 ---")) {
+    return false;
+  }
+  return /^--- .+ ---$/.test(line);
+}
+
+/** 侵攻開始を先頭に並べ替え（旧ログでスキルが前に付いていた場合の補正） */
+function sortBattleActions(actions: ActionGroup[]): ActionGroup[] {
+  const invasionIdx = actions.findIndex((a) => a.title === "侵攻開始");
+  if (invasionIdx <= 0) return actions;
+  const sorted = [...actions];
+  const [invasion] = sorted.splice(invasionIdx, 1);
+  return [invasion, ...sorted];
 }
 
 /** サーバーが埋め込む [ts:ミリ秒] プレフィックスを抽出し、本文とタイムスタンプを返す */
@@ -105,6 +184,8 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
   let postBattleLootMode = false;
   /** 現在の戦闘グループの基準タイムスタンプ */
   let currentBattleTsMs: number | null = null;
+  const playerUnitNames = buildPlayerUnitNames();
+  let characterSides = new Map<string, "ally" | "enemy">();
 
   /** 進行中の魔獣入手ブロックを確定して histories へ追加 */
   function finalizeCurrent() {
@@ -118,6 +199,9 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
 
   for (let lineIdx = 0; lineIdx < rawLogs.length; lineIdx++) {
     const { text: line, tsMs } = parseLogLine(rawLogs[lineIdx]);
+    if (isHiddenBattleDelimiter(line)) {
+      continue;
+    }
     const type = classifyLog(line);
 
     if (postBattleLootMode && currentBattle && !isLootRelatedLine(line) && type !== "battle_start") {
@@ -185,12 +269,14 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
 
     if (type === "battle_start") {
       postBattleLootMode = false;
+      characterSides = new Map();
       let preludeActions: ActionGroup[] = [];
       if (currentBattle) {
         if (currentAction) currentBattle.actions.push(currentAction);
         currentAction = null;
         if (currentBattle.title === "戦闘" && currentBattle.result === "ongoing") {
-          preludeActions = currentBattle.actions;
+          // 侵攻開始より前に流れてきたスキルは別戦闘の残骸。侵攻開始の後ろへ回す
+          preludeActions = currentBattle.actions.filter((a) => a.type !== "skill");
         } else {
           histories.push(currentBattle);
         }
@@ -280,12 +366,14 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
         currentBattle.actions.push(currentAction);
       }
       const skillMatch = line.match(/「(.+?)」/);
-      const charMatch = line.match(/^[◆★]*\s*(.+?)の/);
+      const charName = parseSkillCharacterName(line);
+      const side = resolveActionSide(line, charName, characterSides, playerUnitNames);
       currentAction = {
         type: "skill",
-        title: `${charMatch?.[1] ?? ""}の${skillMatch?.[1] ?? "スキル"}`,
+        title: `${charName}の${skillMatch?.[1] ?? "スキル"}`,
         icon: getLogIcon(type),
         lines: [line],
+        side,
       };
       continue;
     }
@@ -294,12 +382,15 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
       if (currentAction) {
         currentBattle.actions.push(currentAction);
       }
-      const attackMatch = line.match(/(.+?)が(.+?)に攻撃/);
+      const attackerName = parseAttackAttackerName(line);
+      const attackMatch = line.match(/^(?:\[味方\]\s*|\[敵\]\s*)?(.+?)が(.+?)に攻撃/);
+      const side = resolveActionSide(line, attackerName, characterSides, playerUnitNames);
       currentAction = {
         type: "attack",
         title: attackMatch ? `${attackMatch[1]} → ${attackMatch[2]}` : "攻撃",
         icon: "⚔️",
         lines: [line],
+        side,
       };
       continue;
     }
@@ -363,15 +454,18 @@ function showBattleDetail(battle: BattleHistory): void {
           <button class="detail-close" data-close="true">✕</button>
         </div>
         <div class="detail-content">
-          ${battle.actions.map((action, idx) => `
-            <div class="action-group action-${action.type}" data-action-idx="${idx}">
+          ${sortBattleActions(battle.actions).map((action, idx) => `
+            <div class="action-group action-${action.type}${actionSideClass(action)}" data-action-idx="${idx}">
               <div class="action-header">
                 <span class="action-icon">${action.icon}</span>
+                ${actionSideBadge(action)}
                 <span class="action-title">${escapeHtml(action.title)}</span>
                 <span class="action-toggle">▼</span>
               </div>
               <div class="action-body">
-                ${action.lines.map(line => {
+                ${action.lines
+                  .filter((line) => !isHiddenBattleDelimiter(line))
+                  .map(line => {
                   const type = classifyLog(line);
                   const icon = getLogIcon(type);
                   return `<div class="action-line action-line-${type}">

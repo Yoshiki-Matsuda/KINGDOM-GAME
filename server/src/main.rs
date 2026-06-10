@@ -5,6 +5,7 @@
 //! - 永続化: 起動時に data/state.json をロード、行動ごとに保存。サーバー再起動で状態復元。
 
 mod app_state;
+mod auth;
 mod cards;
 mod facilities;
 mod http_api;
@@ -20,10 +21,10 @@ mod skills;
 
 use axum::{routing::{get, post}, Router};
 use std::{net::SocketAddr, sync::Arc};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use app_state::AppState;
-use model::{cleanup_expired_ruins, reconcile_singleplayer_after_load, GameState};
+use model::{cleanup_expired_ruins, GameState};
 use persistence::{load_state, save_state, state_path};
 use ruin_scheduler::spawn_ruin_scheduler;
 
@@ -32,6 +33,7 @@ use ruin_scheduler::spawn_ruin_scheduler;
 #[tokio::main]
 async fn main() {
     let state_path = state_path();
+    let auth_path = std::path::PathBuf::from("data/auth.json");
     let mut game = match load_state(&state_path).await {
         Some(loaded) => {
             println!("[kingdom-server] 保存済み状態を読み込みました: {}", state_path.display());
@@ -45,8 +47,10 @@ async fn main() {
         }
     };
 
-    reconcile_singleplayer_after_load(&mut game);
     model::migrate_log_timestamps(&mut game);
+    model::migrate_legacy_neutral_enemies(&mut game);
+    model::refresh_all_test_players(&mut game);
+    let _ = save_state(&state_path, &game).await;
 
     // 起動時に期限切れの遺跡をクリーンアップ
     if cleanup_expired_ruins(&mut game) {
@@ -63,10 +67,16 @@ async fn main() {
 
     // 戦闘処理中にブロードキャストが留まりすぎると RecvError::Lagged になるため余裕を持たせる
     let (broadcast_tx, _) = broadcast::channel(256);
+    let jwt_secret = std::env::var("AUTH_JWT_SECRET")
+        .unwrap_or_else(|_| "dev-only-change-this-secret".to_string())
+        .into_bytes();
     let app_state = AppState {
         game: Arc::new(RwLock::new(game)),
+        mutation_lock: Arc::new(Mutex::new(())),
         broadcast_tx,
         state_path,
+        auth_path,
+        jwt_secret: Arc::new(jwt_secret),
         dev_auto_win,
     };
 
@@ -82,6 +92,9 @@ async fn main() {
         .route("/health", get(http_api::health))
         .route("/api", get(http_api::api_info))
         .route("/api/state", get(http_api::api_state))
+        .route("/api/whoami", get(http_api::api_whoami))
+        .route("/auth/register", post(http_api::auth_register))
+        .route("/auth/login", post(http_api::auth_login))
         .route("/admin/wipe", post(http_api::admin_wipe))
         .route("/ws", get(realtime::ws_handler))
         .layer(cors)
@@ -99,6 +112,12 @@ async fn main() {
     println!(
         "  POST /admin/wipe -> ワイプ（完全初期化。メンテ再起動では使わない）curl -X POST http://127.0.0.1:{}/admin/wipe",
         port
+    );
+    println!(
+        "  テスト用アカウント: offline_test / player（魔獣10体・各9999・スタミナ満タン）"
+    );
+    println!(
+    "      $env:DEV_AUTO_WIN="1"; cargo run"
     );
     println!("  GET /ws          -> WebSocket（状態配信・行動受付）");
     println!("  行動例: 送信 {{\"action\":\"end_turn\"}} でターン進行");

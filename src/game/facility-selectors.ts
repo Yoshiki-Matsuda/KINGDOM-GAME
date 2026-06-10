@@ -1,5 +1,4 @@
 import {
-  DEFAULT_PLAYER_ID,
   getPlayerData,
   getPlayerFacilities,
   getPlayerInventory,
@@ -7,6 +6,7 @@ import {
   type GameState,
   type InventoryItem,
 } from "../shared/game-state";
+import { getLocalPlayerId } from "../store";
 import {
   calculateFacilityBonuses,
   type FacilityBonuses,
@@ -30,7 +30,7 @@ export function getFacilityBonusesForState(
   state: GameState,
   now: number = Date.now(),
 ): FacilityBonuses {
-  return calculateFacilityBonuses(getCompletedFacilitiesMap(getPlayerFacilities(state), now));
+  return calculateFacilityBonuses(getCompletedFacilitiesMap(getPlayerFacilities(state, getLocalPlayerId()), now));
 }
 
 export function getHomeGridSize(_state: GameState, _now: number = Date.now()): number {
@@ -49,15 +49,15 @@ export function getUnitCapacity(state: GameState, now: number = Date.now()): num
 const DEFAULT_UNIT_COST_CAP = 4;
 
 export function getEffectiveUnitCostCap(state: GameState, now: number = Date.now()): number {
-  const p = getPlayerData(state, DEFAULT_PLAYER_ID);
-  const base = p?.unit_cost_cap ?? state.unit_cost_cap ?? DEFAULT_UNIT_COST_CAP;
+  const p = getPlayerData(state, getLocalPlayerId());
+  const base = p?.unit_cost_cap ?? DEFAULT_UNIT_COST_CAP;
   return base + getFacilityBonusesForState(state, now).unitCostCapBonus;
 }
 
 export function getInventoryForState(state: GameState): InventoryItem[] {
-  return getPlayerInventory(state);
+  return getPlayerInventory(state, getLocalPlayerId());
 }
 
 export function getFacilitiesForState(state: GameState): BuiltFacility[] {
-  return getPlayerFacilities(state);
+  return getPlayerFacilities(state, getLocalPlayerId());
 }

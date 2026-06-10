@@ -17,6 +17,7 @@ pub(crate) fn spawn_ruin_scheduler(state: AppState) {
 
             let mut changed = false;
             {
+                let _guard = state.mutation_lock.lock().await;
                 let mut game = state.game.write().await;
 
                 if cleanup_expired_ruins(&mut game) {
@@ -35,11 +36,13 @@ pub(crate) fn spawn_ruin_scheduler(state: AppState) {
                         );
                     }
                 }
+                if changed {
+                    let _ = save_state(&state.state_path, &game).await;
+                }
             }
 
             if changed {
                 let game = state.game.read().await;
-                let _ = save_state(&state.state_path, &game).await;
                 let json = serde_json::to_string(&*game).unwrap_or_default();
                 let _ = state.broadcast_tx.send(json);
             }

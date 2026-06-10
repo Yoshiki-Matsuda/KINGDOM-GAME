@@ -8,6 +8,7 @@ import {
   getNextFormedUnitId,
   setBodyMonsterCounts, setBodySpeeds,
   gameState,
+  getLocalPlayerId,
 } from "../store";
 import {
   getPlayerCardMonsterCounts,
@@ -17,7 +18,7 @@ import {
 } from "../shared/game-state";
 import { BODIES_PER_UNIT, DEFAULT_BODY_MONSTER_COUNT, DEFAULT_BODY_SPEED, getCharacterStats } from "./characters";
 import { getEffectiveUnitCostCap } from "./facility-selectors";
-import { HOME_TERRITORY_ID } from "../map-view";
+import { getPlayerHomeTerritoryId } from "./territories";
 
 /** KC: 編成3枠のうちリーダーはインデックス2（前0・中1・リーダー2） */
 export const KC_LEADER_FORMATION_SLOT_INDEX = 2;
@@ -43,7 +44,8 @@ export function formationBodyIndicesInSlotOrder(indices: [number, number, number
 
 /** 本拠地の体数を取得 */
 export function getHomeTroops(): number {
-  const t = gameState.territories.find((x) => x.id === HOME_TERRITORY_ID);
+  const homeId = getPlayerHomeTerritoryId(gameState, getLocalPlayerId());
+  const t = gameState.territories.find((x) => x.id === homeId);
   return t?.troops ?? 0;
 }
 
@@ -53,7 +55,7 @@ export function getHomeTroops(): number {
  */
 export function validateFormedUnits(): void {
   const homeTroops = getHomeTroops();
-  const serverCounts = getPlayerCardMonsterCounts(gameState);
+  const serverCounts = getPlayerCardMonsterCounts(gameState, getLocalPlayerId());
   let counts =
     serverCounts.length >= homeTroops
       ? [...serverCounts]
@@ -115,48 +117,94 @@ export function recalcUnitStats(
   return { monster_count, avgSpeed };
 }
 
-/** 所持魔獣IDが本拠体インデックスに収まるものを優先し、足りなければ 0..から埋める */
+function slotCost(slotIndex: number): number {
+  const owned = getPlayerOwnedCards(gameState, getLocalPlayerId());
+  return getCharacterStats(owned[slotIndex] ?? 0).cost;
+}
+
+function indicesTotalCost(indices: [number, number, number]): number {
+  return indices.reduce((sum, i) => (i >= 0 ? sum + slotCost(i) : sum), 0);
+}
+
+/** コスト上限内で先頭3スロットを優先し、足りなければ安い順に3体選ぶ */
 function pickDefaultIndicesForOwned(): [number, number, number] | null {
   const troops = getHomeTroops();
   if (troops < BODIES_PER_UNIT) return null;
-  const owned = getPlayerOwnedCards(gameState);
-  const picks: number[] = [];
+  const owned = getPlayerOwnedCards(gameState, getLocalPlayerId());
+  const cap = getEffectiveUnitCostCap(gameState);
+
+  const candidates: { idx: number; cost: number }[] = [];
   const seen = new Set<number>();
-  for (let slot = 0; slot < owned.length && slot < troops && picks.length < 3; slot++) {
+  for (let slot = 0; slot < owned.length && slot < troops; slot++) {
     if (!seen.has(slot)) {
       seen.add(slot);
-      picks.push(slot);
+      candidates.push({ idx: slot, cost: slotCost(slot) });
     }
   }
-  for (let b = 0; b < troops && picks.length < 3; b++) {
+  for (let b = 0; b < troops; b++) {
     if (!seen.has(b)) {
       seen.add(b);
-      picks.push(b);
+      candidates.push({ idx: b, cost: slotCost(b) });
     }
   }
-  if (picks.length < 3) return null;
-  return [picks[0], picks[1], picks[2]];
+  if (candidates.length < BODIES_PER_UNIT) return null;
+
+  const tryPick = (ordered: { idx: number; cost: number }[]): [number, number, number] | null => {
+    const picks: number[] = [];
+    let total = 0;
+    for (const c of ordered) {
+      if (picks.length >= BODIES_PER_UNIT) break;
+      if (total + c.cost > cap + 0.0001) continue;
+      picks.push(c.idx);
+      total += c.cost;
+    }
+    if (picks.length < BODIES_PER_UNIT) return null;
+    return [picks[0], picks[1], picks[2]];
+  };
+
+  const headFirst = tryPick(candidates);
+  if (headFirst) return headFirst;
+
+  const byCost = [...candidates].sort((a, b) => a.cost - b.cost || a.idx - b.idx);
+  return tryPick(byCost);
 }
 
-/** 開発用: 編成が0のとき1ユニットを自動追加（所持と体インデックスのずれを抑える） */
+function applyDefaultFormationToUnit(
+  unit: (typeof formedUnitsList)[number],
+  tri: [number, number, number],
+): (typeof formedUnitsList)[number] {
+  const { monster_count, avgSpeed } = recalcUnitStats(tri, bodyMonsterCounts, bodySpeeds);
+  return { ...unit, indices: tri, monster_count, avgSpeed };
+}
+
+/** 開発用: 出撃可能ユニットが無いとき自動で1ユニットを満たす */
 export function ensureDevUnit(): void {
   validateFormedUnits();
-  if (formedUnitsList.length !== 0 || getHomeTroops() < BODIES_PER_UNIT) return;
+  if (getHomeTroops() < BODIES_PER_UNIT) return;
+
+  const hasDeployable = formedUnitsList.some((u) => isKcUnitReadyToDeploy(u.indices));
+  if (hasDeployable) return;
 
   const tri = pickDefaultIndicesForOwned();
   if (!tri) return;
 
   const cap = getEffectiveUnitCostCap(gameState);
-  const owned = getPlayerOwnedCards(gameState);
-  const devCost = tri.reduce((s, i) => s + getCharacterStats(owned[i] ?? 0).cost, 0);
-  if (devCost > cap + 0.0001) return;
+  if (indicesTotalCost(tri) > cap + 0.0001) return;
 
-  const { monster_count, avgSpeed } = recalcUnitStats(tri, bodyMonsterCounts, bodySpeeds);
+  const emptyIdx = formedUnitsList.findIndex((u) => !isKcUnitReadyToDeploy(u.indices));
+  if (emptyIdx >= 0) {
+    const updated = [...formedUnitsList];
+    updated[emptyIdx] = applyDefaultFormationToUnit(formedUnitsList[emptyIdx], tri);
+    setFormedUnitsList(updated);
+    return;
+  }
+
+  if (formedUnitsList.length !== 0) return;
+
   setFormedUnitsList([{
     id: `unit-${getNextFormedUnitId()}`,
     name: "ユニット1",
     indices: tri,
-    monster_count,
-    avgSpeed,
+    ...recalcUnitStats(tri, bodyMonsterCounts, bodySpeeds),
   }]);
 }

@@ -5,9 +5,14 @@
 
 import { USE_MOCK_STATE } from "./config";
 import type { GameState, Territory, SkillDataPayload, CardStatsPayload } from "./shared/game-state";
-import { DEFAULT_GAME_STATE } from "./shared/game-state";
+import { DEFAULT_GAME_STATE, DEFAULT_PLAYER_ID } from "./shared/game-state";
 import { getMockGameState } from "./shared/mock-state";
 export { USE_MOCK_STATE, WS_URL } from "./config";
+
+// 旧バージョンの残骸。プレイヤーIDはサーバーが JWT から返す値のみを信頼する。
+localStorage.removeItem("kingdom.player_id");
+
+const storedAuthToken = localStorage.getItem("kingdom.auth_token");
 
 // --- ゲーム状態 ---
 export let gameState: GameState = USE_MOCK_STATE ? getMockGameState() : DEFAULT_GAME_STATE;
@@ -15,6 +20,38 @@ export function setGameState(s: GameState) { gameState = s; }
 
 export let connectionStatus: "online" | "offline" = "offline";
 export function setConnectionStatus(s: "online" | "offline") { connectionStatus = s; }
+
+/** サーバー /api/whoami で確定したプレイヤーID（メモリのみ） */
+let authenticatedPlayerId: string | null = null;
+export function setAuthenticatedPlayerId(playerId: string | null) {
+  if (authenticatedPlayerId === playerId) return;
+  authenticatedPlayerId = playerId;
+  render();
+}
+
+/** /api/whoami でプレイヤーIDが確定済みか */
+export function isPlayerIdentityResolved(): boolean {
+  return USE_MOCK_STATE || authenticatedPlayerId != null;
+}
+
+/** 操作中プレイヤーID（未ログイン時のみ DEFAULT_PLAYER_ID） */
+export function getLocalPlayerId(): string {
+  if (USE_MOCK_STATE) return DEFAULT_PLAYER_ID;
+  if (authenticatedPlayerId) return authenticatedPlayerId;
+  return DEFAULT_PLAYER_ID;
+}
+
+export let authToken: string | null = storedAuthToken;
+export function setAuthSession(token: string) {
+  authToken = token;
+  authenticatedPlayerId = null;
+  localStorage.setItem("kingdom.auth_token", token);
+}
+export function clearAuthSession() {
+  authToken = null;
+  authenticatedPlayerId = null;
+  localStorage.removeItem("kingdom.auth_token");
+}
 
 export let attackSourceId: string | null = null;
 export function setAttackSourceId(id: string | null) { attackSourceId = id; }
@@ -28,9 +65,7 @@ export interface FormedUnit {
   id: string;
   name: string;
   indices: [number, number, number];
-  /** 編成3体の魔獣数の合計 */
   monster_count: number;
-  /** 編成3体のSPEEDの平均 */
   avgSpeed: number;
 }
 export let formedUnitsList: FormedUnit[] = [];
@@ -42,13 +77,9 @@ export function getNextFormedUnitId(): number { return nextFormedUnitId++; }
 export let formationSelected: number[] = [];
 export function setFormationSelected(sel: number[]) { formationSelected = sel; }
 
-/** 本拠地の各キャラ（体）の魔獣数。インデックス = 体の番号 */
 export let bodyMonsterCounts: number[] = [];
 export function setBodyMonsterCounts(c: number[]) { bodyMonsterCounts = c; }
 
-
-
-/** 本拠地の各キャラ（体）が持つSPEED。インデックス = 体の番号 */
 export let bodySpeeds: number[] = [];
 export function setBodySpeeds(s: number[]) { bodySpeeds = s; }
 
@@ -57,7 +88,6 @@ export interface TravelingUnit {
   id: string;
   unitId: string;
   unitName: string;
-  /** 攻撃・援軍の往路 / 攻撃後の帰還 */
   actionType: "attack" | "deploy" | "return";
   targetId: string;
   fromId?: string;
@@ -67,7 +97,6 @@ export interface TravelingUnit {
   bodyNames: string[];
   skillsPerBody: SkillDataPayload[];
   statsPerBody: CardStatsPayload[];
-  /** getPlayerOwnedCards 上のインデックス（攻撃時スタミナ・XP） */
   ownedCardIndices?: number[];
   departureTime: number;
   arrivalTime: number;
@@ -86,7 +115,7 @@ export type Screen = "map" | "home" | "history" | "inventory" | "market" | "alli
 export let currentScreen: Screen = "map";
 export function setCurrentScreen(s: Screen) { currentScreen = s; }
 
-// --- 本拠地施設（マスごと。key: "col,row", value: 施設種別）
+// --- 本拠地施設 ---
 export type FacilityType = string | null;
 export const homeFacilities = new Map<string, FacilityType>();
 export function setHomeFacility(col: number, row: number, type: FacilityType) {
@@ -111,5 +140,4 @@ let renderCallback: (() => void) | null = null;
 export function setRenderCallback(cb: () => void) { renderCallback = cb; }
 export function render() { renderCallback?.(); }
 
-// re-export for convenience
-export type { GameState, Territory };
+export type { GameState, Territory, SkillDataPayload, CardStatsPayload };

@@ -7,11 +7,11 @@ import {
   bodyMonsterCounts, bodySpeeds,
   formedUnitsList, setFormedUnitsList,
   getNextFormedUnitId,
-  gameState, render, ws,
+  gameState, render, ws, getLocalPlayerId,
 } from "../store";
 import { getPlayerOwnedCards, produceMonstersAction } from "../shared/game-state";
 import { getBodyDisplayName, getCharacterIllustrationPath, getCharacterStats } from "../game/characters";
-import { getHomeTroops, validateFormedUnits, recalcUnitStats } from "../game/formation";
+import { ensureDevUnit, getHomeTroops, validateFormedUnits, recalcUnitStats } from "../game/formation";
 import { getEffectiveUnitCostCap, getUnitCapacity } from "../game/facility-selectors";
 import { buildFormationCardDetailHtml } from "../formation-card-detail";
 import { appendFormedUnit } from "../store-actions";
@@ -30,7 +30,7 @@ function getMaxUnits(): number {
 }
 
 function unitFilledCostSum(indices: [number, number, number]): number {
-  const owned = getPlayerOwnedCards(gameState);
+  const owned = getPlayerOwnedCards(gameState, getLocalPlayerId());
   let s = 0;
   for (const i of indices) {
     if (i >= 0) s += getCharacterStats(owned[i] ?? 0).cost;
@@ -92,6 +92,7 @@ export function createFormationElement(): HTMLDivElement {
 
 export function showFormationScreen(): void {
   validateFormedUnits();
+  ensureDevUnit();
   editingUnitId = null;
   editingSlotIndex = null;
   formationEl.classList.add("is-open");
@@ -202,12 +203,19 @@ function renderCharacterPicker(): void {
 
   const gridEl = characterPickerEl.querySelector("[data-char-picker-grid]")!;
   gridEl.innerHTML = "";
-  const ownedCards = getPlayerOwnedCards(gameState);
+  const ownedCards = getPlayerOwnedCards(gameState, getLocalPlayerId());
+  // 編集中ユニットの他枠で使用中の魔獣種（同種は1ユニットに1体まで）
+  const cardIdsInUnit = new Set(
+    unit.indices
+      .filter((idx, slot) => idx >= 0 && slot !== editingSlotIndex)
+      .map((idx) => ownedCards[idx] ?? idx),
+  );
 
   for (let i = 0; i < homeTroops; i++) {
     const used = usedByOthers.has(i);
     const isCurrentSlot = unit.indices[editingSlotIndex] === i;
-    const canSelect = !used || isCurrentSlot;
+    const sameSpeciesInUnit = cardIdsInUnit.has(ownedCards[i] ?? i);
+    const canSelect = (!used || isCurrentSlot) && (!sameSpeciesInUnit || isCurrentSlot);
 
     const card = document.createElement("button");
     card.type = "button";
@@ -241,7 +249,7 @@ function renderFormationContent(): void {
   addBtn.disabled = formedUnitsList.length >= maxUnits;
 
   listEl.innerHTML = "";
-  const ownedCards = getPlayerOwnedCards(gameState);
+  const ownedCards = getPlayerOwnedCards(gameState, getLocalPlayerId());
   formedUnitsList.forEach((u) => {
     const row = document.createElement("div");
     row.className = "formation-unit-row";
@@ -466,6 +474,16 @@ function setupFormationScreen(): void {
 
     const unit = formedUnitsList.find((u) => u.id === editingUnitId);
     if (!unit) return;
+
+    const ownedCards = getPlayerOwnedCards(gameState, getLocalPlayerId());
+    const pickedCardId = ownedCards[charIndex] ?? charIndex;
+    const duplicateSpecies = unit.indices.some(
+      (idx, slot) => slot !== editingSlotIndex && idx >= 0 && (ownedCards[idx] ?? idx) === pickedCardId,
+    );
+    if (duplicateSpecies) {
+      alert("同じ種類の魔獣は1ユニットに1体までです。別の魔獣を選んでください。");
+      return;
+    }
 
     const newIndices: [number, number, number] = [...unit.indices];
     newIndices[editingSlotIndex] = charIndex;

@@ -8,11 +8,13 @@ import {
     FederatedPointerEvent,
 } from "pixi.js";
 import type { GameState } from "./store";
+import { gameState, getLocalPlayerId, isPlayerIdentityResolved } from "./store";
 import {
     GRID_COLS,
     GRID_ROWS,
-    HOME_TERRITORY_ID,
     formatTerritoryId,
+    getPlayerHomeTerritoryId,
+    isPlayerHomeTile,
     isWithinWorldGrid,
     tryParseTerritoryId,
 } from "./game/territories";
@@ -90,9 +92,62 @@ let _onTerritoryClick: ((id: string, t: any, x: number, y: number) => void) | nu
 let _lastTerritoryMap: Map<string, any> = new Map();
 
 let _terrainGraphics: Graphics | null = null;
+let _borderGraphics: Graphics | null = null;
 let _overlayContainer: Container | null = null;
 let _prevTerritoryJSON = "";
+let _prevMapPlayerId = "";
+let _prevMapHomeId = "";
 let _visible = false;
+let _localHomeTerritoryId = "";
+let _needsFocusOnOpen = true;
+let _homeFocusTargetId: string | null = null;
+
+function getMapViewportSize(): { width: number; height: number } {
+    const parent = (_app?.canvas as HTMLCanvasElement | undefined)?.parentElement;
+    if (parent) {
+        const rect = parent.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+            return { width: rect.width, height: rect.height };
+        }
+    }
+    return { width: _app?.screen.width ?? 0, height: _app?.screen.height ?? 0 };
+}
+
+function focusMapOnTerritory(territoryId: string): boolean {
+    if (!_app || !_tileContainer) return false;
+    const pos = tryParseTerritoryId(territoryId);
+    if (!pos) return false;
+    const { width, height } = getMapViewportSize();
+    if (width <= 0 || height <= 0) return false;
+    const { x, y } = coordToScreen(pos.col, pos.row, TILE_DIMENSIONS);
+    const scale = _tileContainer.scale.x;
+    _tileContainer.x = width / 2 - x * scale;
+    _tileContainer.y = height / 2 - y * scale;
+    return true;
+}
+
+function tryApplyHomeFocus(): boolean {
+    if (!_homeFocusTargetId) return false;
+    if (!focusMapOnTerritory(_homeFocusTargetId)) return false;
+    _needsFocusOnOpen = false;
+    return true;
+}
+
+function requestHomeFocus(territoryId: string): void {
+    _homeFocusTargetId = territoryId;
+    _needsFocusOnOpen = true;
+    tryApplyHomeFocus();
+}
+
+/** 自分の本拠を画面中央に寄せる（状態読み込み後に呼ぶ） */
+export function focusMapOnPlayerHome(): void {
+    if (!_app || !_tileContainer || !isPlayerIdentityResolved()) return;
+    if (gameState.territories.length === 0) return;
+    const playerId = getLocalPlayerId();
+    if (!gameState.players[playerId]) return;
+    const homeId = getPlayerHomeTerritoryId(gameState, playerId);
+    requestHomeFocus(homeId);
+}
 
 const DRAW_ORDER: { col: number; row: number }[] = [];
 for (let sum = 0; sum < GRID_COLS + GRID_ROWS - 1; sum++) {
@@ -148,14 +203,20 @@ async function loadTerrainTextures(): Promise<void> {
     }
 }
 
+export function isMapViewReady(): boolean {
+    return _app != null;
+}
+
 export async function initMapView(
     container: HTMLDivElement,
     options: {
         onTerritoryClick: (id: string, t: any, x: number, y: number) => void;
     }
 ) {
+    if (_app) return;
+
     const app = new Application();
-    await app.init({ resizeTo: window, backgroundColor: 0x0a0a0f });
+    await app.init({ resizeTo: container, backgroundColor: 0x0a0a0f });
     // @ts-ignore
     container.appendChild(app.canvas || app.view);
 
@@ -170,18 +231,22 @@ export async function initMapView(
     _terrainGraphics = new Graphics();
     _tileContainer.addChild(_terrainGraphics);
 
+    _borderGraphics = new Graphics();
+    _tileContainer.addChild(_borderGraphics);
+
     _overlayContainer = new Container();
     _tileContainer.addChild(_overlayContainer);
-
-    const centerScreen = coordToScreen(24, 24, TILE_DIMENSIONS);
-    _tileContainer.x = app.screen.width / 2 - centerScreen.x;
-    _tileContainer.y = app.screen.height / 2 - centerScreen.y;
 
     let scale = 1;
     const MIN_SCALE = 1;
     const MAX_SCALE = 2.5;
 
     app.stage.addChild(_tileContainer);
+
+    const resizeObserver = new ResizeObserver(() => {
+        if (_needsFocusOnOpen) tryApplyHomeFocus();
+    });
+    resizeObserver.observe(container);
 
     // マウスホイールでズーム（カーソル位置を中心に）
     const canvas = app.canvas ?? (app as any).view;
@@ -248,51 +313,116 @@ export async function initMapView(
     app.stage.on("pointerupoutside", onUp);
 }
 
-export function setMapVisible(v: boolean) { _visible = v; }
+export function setMapVisible(v: boolean) {
+    if (v && !_visible) _needsFocusOnOpen = true;
+    _visible = v;
+}
 
 export function updateMapView(
     state: GameState,
     travelingDestinations?: { targetId: string; secLeft: number; unitNames: string[] }[]
 ) {
-    if (!_app || !_tileContainer || !_terrainGraphics || !_overlayContainer) return;
+    if (!_app || !_tileContainer || !_terrainGraphics || !_borderGraphics || !_overlayContainer) return;
     if (!_visible) return;
+    if (!isPlayerIdentityResolved()) return;
 
     _lastTerritoryMap = new Map(state.territories.map(t => [t.id, t]));
+    const playerId = getLocalPlayerId();
+    _localHomeTerritoryId = getPlayerHomeTerritoryId(state, playerId);
+
+    if (playerId !== _prevMapPlayerId) _needsFocusOnOpen = true;
+    if (
+        _needsFocusOnOpen
+        && _localHomeTerritoryId
+        && state.territories.length > 0
+        && state.players[playerId]
+    ) {
+        requestHomeFocus(_localHomeTerritoryId);
+    }
 
     const territoryJSON = JSON.stringify(state.territories);
-    if (territoryJSON !== _prevTerritoryJSON) {
+    const shouldRedrawTerrain =
+        territoryJSON !== _prevTerritoryJSON
+        || playerId !== _prevMapPlayerId
+        || _localHomeTerritoryId !== _prevMapHomeId;
+    if (shouldRedrawTerrain) {
         _prevTerritoryJSON = territoryJSON;
+        _prevMapPlayerId = playerId;
+        _prevMapHomeId = _localHomeTerritoryId;
         redrawTerrain();
     }
+
+    if (_needsFocusOnOpen) tryApplyHomeFocus();
 
     redrawOverlay(travelingDestinations);
 }
 
+const BORDER_STROKE_INNER = { alignment: 1 } as const;
+
+function strokeTerritoryBorder(
+    g: Graphics,
+    points: number[],
+    id: string,
+    t: { owner_id?: string | null; is_base?: boolean; ruin?: { difficulty: string } } | undefined,
+    playerId: string,
+): void {
+    const isHome = isPlayerHomeTile(id, t, playerId, _localHomeTerritoryId);
+
+    if (t?.ruin) {
+        const diffColor = t.ruin.difficulty === "extreme" ? 0x8a1a1a
+            : t.ruin.difficulty === "hard" ? 0x8a4010
+            : t.ruin.difficulty === "normal" ? 0x6a5a20
+            : 0x2a5a2a;
+        g.poly(points, true).stroke({ width: 0.75, color: diffColor, alpha: 0.8, ...BORDER_STROKE_INNER });
+        return;
+    }
+
+    if (isHome) {
+        g.poly(points, true).stroke({ width: 1.5, color: 0x1a0f00, alpha: 0.94, ...BORDER_STROKE_INNER });
+        g.poly(points, true).stroke({ width: 0.9375, color: 0xffe8a8, alpha: 1, ...BORDER_STROKE_INNER });
+    } else if (t?.owner_id === playerId) {
+        g.poly(points, true).stroke({ width: 1.5, color: 0x020810, alpha: 0.94, ...BORDER_STROKE_INNER });
+        g.poly(points, true).stroke({ width: 0.9375, color: 0x9ae8ff, alpha: 1, ...BORDER_STROKE_INNER });
+        if (t.is_base) {
+            g.poly(points, true).stroke({ width: 0.5625, color: 0xffcc66, alpha: 0.95, ...BORDER_STROKE_INNER });
+        }
+    } else if (t?.owner_id && t.owner_id !== "barbarian") {
+        g.poly(points, true).stroke({ width: 1.3125, color: 0x140306, alpha: 0.94, ...BORDER_STROKE_INNER });
+        g.poly(points, true).stroke({ width: 0.75, color: 0xd84050, alpha: 0.98, ...BORDER_STROKE_INNER });
+    } else {
+        g.poly(points, true).stroke({ width: 1.125, color: 0x101014, alpha: 0.45, ...BORDER_STROKE_INNER });
+        g.poly(points, true).stroke({ width: 0.65625, color: 0xb0b4bc, alpha: 0.55, ...BORDER_STROKE_INNER });
+    }
+}
+
 function redrawTerrain() {
     const g = _terrainGraphics!;
+    const borders = _borderGraphics!;
     const container = _overlayContainer!;
     g.clear();
+    borders.clear();
 
     while (container.children.length > 0) container.removeChildAt(0);
+
+    const playerId = getLocalPlayerId();
+    const tileDrawData: {
+        points: number[];
+        id: string;
+        t: { owner_id?: string | null; is_base?: boolean; ruin?: { difficulty: string; formation_name: string } } | undefined;
+        level: number;
+    }[] = [];
 
     for (const { col, row } of DRAW_ORDER) {
         const id = formatTerritoryId(col, row);
         const t = _lastTerritoryMap.get(id);
         const level = t?.level ?? 1;
-        const isRuin = !!t?.ruin;
-
         const { x: cx, y: cy } = coordToScreen(col, row, TILE_DIMENSIONS);
         const points = diamondPoints(cx, cy, TILE_DIMENSIONS);
+        tileDrawData.push({ points, id, t, level });
 
-        if (isRuin) {
+        if (t?.ruin) {
             const ruinVisual = getRuinVisual(t.ruin.formation_name);
             g.poly(points, true).fill(ruinVisual.color);
-
-            const diffColor = t.ruin.difficulty === "extreme" ? 0x8a1a1a
-                : t.ruin.difficulty === "hard" ? 0x8a4010
-                : t.ruin.difficulty === "normal" ? 0x6a5a20
-                : 0x2a5a2a;
-            g.poly(points, true).stroke({ width: 2, color: diffColor, alpha: 0.8 });
 
             const ruinText = new Text({
                 text: ruinVisual.icon,
@@ -302,39 +432,29 @@ function redrawTerrain() {
             ruinText.x = cx;
             ruinText.y = cy;
             container.addChild(ruinText);
-        } else {
-            let color = 0x4a4838;
-            if (t) {
-                if (t.owner_id === "player") color = 0x2a3a5a;
-                else if (t.owner_id && t.owner_id !== "barbarian") color = 0x5a2a30;
-                else color = terrainColor(level);
-            }
-
-            const tex = id === HOME_TERRITORY_ID ? CASTLE_TEXTURE : TERRAIN_TEXTURES[level];
-
-            if (tex) {
-                g.poly(points, true).fill({ texture: tex, textureSpace: "local" });
-            } else {
-                g.poly(points, true).fill(color);
-            }
-
-            // テクスチャを隠さないよう装飾は枠線のみ（二重線で視認性を確保）
-            if (id === HOME_TERRITORY_ID) {
-                g.poly(points, true).stroke({ width: 4, color: 0x1a0f00, alpha: 0.94 });
-                g.poly(points, true).stroke({ width: 2.5, color: 0xffe8a8, alpha: 1 });
-            } else if (t?.owner_id === "player") {
-                g.poly(points, true).stroke({ width: 4, color: 0x020810, alpha: 0.94 });
-                g.poly(points, true).stroke({ width: 2.5, color: 0x9ae8ff, alpha: 1 });
-                if (t.is_base) {
-                    g.poly(points, true).stroke({ width: 1.5, color: 0xffcc66, alpha: 0.95 });
-                }
-            } else if (t?.owner_id && t.owner_id !== "barbarian") {
-                g.poly(points, true).stroke({ width: 3.5, color: 0x200508, alpha: 0.92 });
-                g.poly(points, true).stroke({ width: 2, color: 0xff9aaa, alpha: 0.98 });
-            } else {
-                g.poly(points, true).stroke({ width: 1, color: 0x2a2418, alpha: 0.55 });
-            }
+            continue;
         }
+
+        const isHome = isPlayerHomeTile(id, t, playerId, _localHomeTerritoryId);
+        let color = 0x4a4838;
+        if (t) {
+            if (t.owner_id === playerId) color = 0x2a3a5a;
+            else if (t.owner_id && t.owner_id !== "barbarian") color = 0x5a2a30;
+            else color = terrainColor(level);
+        }
+
+        const tex = isHome ? CASTLE_TEXTURE : TERRAIN_TEXTURES[level];
+        if (tex) {
+            g.poly(points, true).fill({ texture: tex, textureSpace: "local" });
+        } else {
+            g.poly(points, true).fill(color);
+        }
+    }
+
+    // 枠線は専用レイヤーに奥→手前の逆順で描く（下半分が隣タイルに隠れない）
+    for (let i = tileDrawData.length - 1; i >= 0; i--) {
+        const { points, id, t } = tileDrawData[i];
+        strokeTerritoryBorder(borders, points, id, t, playerId);
     }
 }
 

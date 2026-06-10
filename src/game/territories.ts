@@ -45,10 +45,11 @@ export function isWithinWorldGrid(col: number, row: number): boolean {
   return col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS;
 }
 
-export function getDistanceFromHome(territoryId: string): number {
-  const position = tryParseTerritoryId(territoryId);
-  if (!position) return 0;
-  return Math.abs(position.col - HOME_COL) + Math.abs(position.row - HOME_ROW);
+export function getDistanceFromHome(territoryId: string, homeTerritoryId: string = HOME_TERRITORY_ID): number {
+  const home = tryParseTerritoryId(homeTerritoryId);
+  const target = tryParseTerritoryId(territoryId);
+  if (!home || !target) return 0;
+  return Math.abs(target.col - home.col) + Math.abs(target.row - home.row);
 }
 
 export function getDistanceBetweenTerritories(fromId: string, toId: string): number {
@@ -60,4 +61,29 @@ export function getDistanceBetweenTerritories(fromId: string, toId: string): num
 
 export function isHomeTerritoryId(id: string): boolean {
   return id === HOME_TERRITORY_ID;
+}
+
+interface HomeLookupState {
+  players: Record<string, { home_territory_id: string }>;
+  territories?: { id: string; owner_id?: string | null; is_base?: boolean }[];
+}
+
+export function getPlayerHomeTerritoryId(state: HomeLookupState, playerId: string): string {
+  const fromPlayer = state.players[playerId]?.home_territory_id;
+  if (fromPlayer) return fromPlayer;
+  const ownedBase = state.territories?.find(
+    (t) => t.owner_id === playerId && t.is_base,
+  );
+  if (ownedBase) return ownedBase.id;
+  return HOME_TERRITORY_ID;
+}
+
+export function isPlayerHomeTile(
+  territoryId: string,
+  territory: { owner_id?: string | null; is_base?: boolean } | undefined,
+  playerId: string,
+  homeTerritoryId: string,
+): boolean {
+  if (territoryId === homeTerritoryId) return true;
+  return territory?.owner_id === playerId && territory.is_base === true;
 }

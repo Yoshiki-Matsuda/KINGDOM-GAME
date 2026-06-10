@@ -2,8 +2,8 @@
  * 同盟画面
  */
 
-import { setCurrentScreen, render, gameState, ws } from "../store";
-import { DEFAULT_PLAYER_ID, type Alliance } from "../shared/game-state";
+import { setCurrentScreen, render, gameState, ws, getLocalPlayerId } from "../store";
+import type { Alliance } from "../shared/game-state";
 
 let allianceEl: HTMLDivElement | null = null;
 
@@ -22,7 +22,7 @@ export function showAllianceScreen(): void {
 
 function findPlayerAlliance(): Alliance | undefined {
   if (!gameState?.alliances) return undefined;
-  return gameState.alliances.find(a => a.member_ids.includes(DEFAULT_PLAYER_ID));
+  return gameState.alliances.find(a => a.member_ids.includes(getLocalPlayerId()));
 }
 
 export function renderAlliance(): void {

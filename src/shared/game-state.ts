@@ -51,16 +51,21 @@ export interface InventoryItem {
 }
 
 /** 建設済み施設 */
+export interface FacilityPosition {
+  col: number;
+  row: number;
+}
+
 export interface BuiltFacility {
   facility_id: string;
   level: number;
   /** 建設完了時刻（Unix timestamp ms）。nullなら完了済み */
   build_complete_at?: number | null;
   /** 配置座標（ホームマップ上） */
-  position?: { col: number; row: number };
+  position?: FacilityPosition;
 }
 
-/** デフォルトのプレイヤーID（シングルプレイ時） */
+/** デフォルトの操作プレイヤーID */
 export const DEFAULT_PLAYER_ID = "player";
 
 /** 所持魔獣1枠あたりの魔獣数の共通下限（サーバー `MIN_MONSTER_COUNT_PER_CARD_SLOT` と一致） */
@@ -81,11 +86,14 @@ export interface Resources {
   gold: number;
 }
 
+/** フリーマーケットで売買できる基本資源 */
+export type BasicResourceType = "food" | "wood" | "stone" | "iron";
+
 /** フリーマーケット出品物の種別 */
 export type MarketItemType =
   | { type: "card"; card_id: number }
   | { type: "item"; item_id: string; count: number }
-  | { type: "resource"; resource_type: string; amount: number };
+  | { type: "resource"; resource_type: BasicResourceType; amount: number };
 
 /** フリーマーケットの出品情報 */
 export interface MarketListing {
@@ -111,10 +119,18 @@ export interface PlayerData {
   /** 援軍を送れる他プレイヤーのID（クラン・配下など） */
   allied_player_ids: string[];
   /** 4種基本資源 */
-  resources?: Resources;
+  resources: Resources;
   card_levels?: number[];
   card_exp?: number[];
   card_stamina?: number[];
+  /** 所持魔獣スロットごとのステータスポイント残量（KC準拠: Lvアップで+3） */
+  card_status_points?: number[];
+  /** 所持魔獣スロットごとの休息解除時刻（Unix timestamp ms）。未来なら休息中 */
+  card_rest_until?: number[];
+  /** 所持魔獣スロットごとの覚醒フラグ（KC準拠: Lv99超え可） */
+  card_awakened?: boolean[];
+  /** 所持魔獣スロットごとの強化魔獣(★)フラグ */
+  card_enhanced?: boolean[];
   /** 所持魔獣スロットごとの現在魔獣数（本拠の body_monster_counts と対応） */
   card_monster_counts?: number[];
   exploration_level?: number;
@@ -135,43 +151,22 @@ export interface ExplorationMission {
   card_indices: number[];
 }
 
+export type GamePhase = "idle" | "player_turn" | "enemy_turn";
+
 export interface GameState {
   turn: number;
-  phase: string;
+  phase: GamePhase;
   territories: Territory[];
   /** バックエンドで発生した行動ログ。ユーザーは閲覧のみ */
   log: string[];
   /** 全プレイヤーのデータ（プレイヤーID -> PlayerData） */
-  players?: Record<string, PlayerData>;
-  
-  // === 後方互換性のため残す（シングルプレイ時はここに直接入る） ===
-  /** 援軍を送れる領の owner_id（自領 "player" に加え、クラン・配下など）。空なら自領のみ */
-  deployable_owner_ids?: string[];
-  /** プレイヤーのインベントリ（シングルプレイ用、マルチでは players を参照） */
-  inventory?: InventoryItem[];
-  /** 建設済み施設一覧（シングルプレイ用） */
-  facilities?: BuiltFacility[];
-  /** プレイヤーの所持魔獣（シングルプレイ用・`owned_cards`） */
-  owned_cards?: number[];
-  /** 4種基本資源（シングルプレイ用） */
-  resources?: Resources;
+  players: Record<string, PlayerData>;
   /** 同盟一覧 */
   alliances?: Alliance[];
   /** シーズン情報 */
   season?: SeasonInfo;
   /** フリーマーケット出品一覧 */
   market_listings?: MarketListing[];
-  card_levels?: number[];
-  card_exp?: number[];
-  card_stamina?: number[];
-  exploration_level?: number;
-  exploration_score?: number;
-  unit_cost_cap?: number;
-  dungeon_points?: number;
-  charge_points?: number;
-  explorations?: ExplorationMission[];
-  /** シングルプレイ用ミラー: 魔獣スロットごとの魔獣数 */
-  card_monster_counts?: number[];
 }
 
 /** KC準拠の同盟データ */
@@ -194,68 +189,71 @@ export interface SeasonInfo {
   duration_ms: number;
 }
 
-/** プレイヤーデータを取得（後方互換対応） */
+/** プレイヤーデータを取得 */
 export function getPlayerData(state: GameState, playerId: string = DEFAULT_PLAYER_ID): PlayerData | null {
-  return state.players?.[playerId] ?? null;
+  return state.players[playerId] ?? null;
 }
 
-/** プレイヤーのインベントリを取得（後方互換対応） */
+/** プレイヤーのインベントリを取得 */
 export function getPlayerInventory(state: GameState, playerId: string = DEFAULT_PLAYER_ID): InventoryItem[] {
-  return state.players?.[playerId]?.inventory ?? state.inventory ?? [];
+  return state.players[playerId]?.inventory ?? [];
 }
 
 /** プレイヤーの施設を取得 */
 export function getPlayerFacilities(state: GameState, playerId: string = DEFAULT_PLAYER_ID): BuiltFacility[] {
-  return state.players?.[playerId]?.facilities ?? state.facilities ?? [];
+  return state.players[playerId]?.facilities ?? [];
 }
 
-/** プレイヤーの食料（トップレベル resources にフォールバック） */
+/** プレイヤーの資源を取得 */
+export function getPlayerResources(state: GameState, playerId: string = DEFAULT_PLAYER_ID): Resources {
+  return state.players[playerId]?.resources ?? DEFAULT_RESOURCES;
+}
+
+/** プレイヤーの食料 */
 export function getPlayerFood(state: GameState, playerId: string = DEFAULT_PLAYER_ID): number {
-  const fromPlayer = state.players?.[playerId]?.resources?.food;
+  const fromPlayer = state.players[playerId]?.resources.food;
   if (fromPlayer != null && Number.isFinite(fromPlayer)) return fromPlayer;
-  const top = state.resources?.food;
-  if (top != null && Number.isFinite(top)) return top;
   return 0;
 }
 
-/** プレイヤーの所持魔獣を取得（`players` が空配列でもトップレベル `owned_cards` にフォールバック） */
+/** プレイヤーの所持魔獣を取得 */
 export function getPlayerOwnedCards(state: GameState, playerId: string = DEFAULT_PLAYER_ID): number[] {
-  const fromPlayer = state.players?.[playerId]?.owned_cards;
-  const top = state.owned_cards ?? [];
-  if (Array.isArray(fromPlayer) && fromPlayer.length > 0) return fromPlayer;
-  if (top.length > 0) return top;
-  return Array.isArray(fromPlayer) ? fromPlayer : [];
+  return state.players[playerId]?.owned_cards ?? [];
 }
 
-/** 所持魔獣スロットごとの魔獣数（サーバー権威・トップレベルにフォールバック） */
+/** 所持魔獣スロットごとの魔獣数 */
 export function getPlayerCardMonsterCounts(state: GameState, playerId: string = DEFAULT_PLAYER_ID): number[] {
-  const fromPlayer = state.players?.[playerId]?.card_monster_counts;
-  const top = state.card_monster_counts ?? [];
-  if (Array.isArray(fromPlayer) && fromPlayer.length > 0) return fromPlayer;
-  if (top.length > 0) return top;
-  return Array.isArray(fromPlayer) ? fromPlayer : [];
+  return state.players[playerId]?.card_monster_counts ?? [];
 }
 
 /** プレイヤーが援軍を送れるowner_idリストを取得 */
 export function getDeployableOwnerIds(state: GameState, playerId: string = DEFAULT_PLAYER_ID): string[] {
-  const playerData = state.players?.[playerId];
+  const playerData = state.players[playerId];
   if (playerData) {
     return [playerId, ...playerData.allied_player_ids];
   }
-  return [playerId, ...(state.deployable_owner_ids ?? [])];
+  return [playerId];
 }
 
 /** サーバーから状態を取得するため、クライアント側のデフォルトは空。マップは state 受信後に全マス表示。 */
+export const DEFAULT_RESOURCES: Resources = { food: 0, wood: 0, stone: 0, iron: 0, gold: 0 };
+
 export const DEFAULT_GAME_STATE: GameState = {
   turn: 1,
   phase: "idle",
   log: [],
   territories: [],
-  players: {},
-  deployable_owner_ids: [],
-  inventory: [],
-  facilities: [],
-  owned_cards: [],
+  players: {
+    [DEFAULT_PLAYER_ID]: {
+      player_id: DEFAULT_PLAYER_ID,
+      home_territory_id: "c_24_24",
+      inventory: [],
+      facilities: [],
+      owned_cards: [],
+      allied_player_ids: [],
+      resources: DEFAULT_RESOURCES,
+    },
+  },
 };
 
 /** レベル → 地形名（マスイラストとリンク） */
@@ -329,10 +327,17 @@ export type Action =
     territory_id: string;
   }
   | {
-      action: "synthesize_card";
-      base_card_index: number;
-      material_card_indices: number[];
-    }
+    action: "build_facility";
+    facility_id: string;
+    level: number;
+    /** 配置座標（ホームマップ上）。サーバーは建設時間を施設定義から計算する */
+    position: FacilityPosition;
+  }
+  | {
+    action: "synthesize_card";
+    base_card_index: number;
+    material_card_indices: number[];
+  }
   | { action: "create_alliance"; name: string }
   | { action: "join_alliance"; alliance_id: string }
   | { action: "leave_alliance" }
@@ -348,6 +353,19 @@ export const END_TURN_ACTION: Action = { action: "end_turn" };
 
 export function buildBaseAction(territoryId: string): Action {
   return { action: "build_base", territory_id: territoryId };
+}
+
+export function buildFacilityAction(
+  facilityId: string,
+  level: number,
+  position: FacilityPosition,
+): Action {
+  return {
+    action: "build_facility",
+    facility_id: facilityId,
+    level,
+    position,
+  };
 }
 
 export function deployAction(

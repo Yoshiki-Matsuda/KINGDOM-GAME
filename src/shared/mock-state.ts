@@ -4,7 +4,7 @@
  */
 
 import type { GameState, Territory } from "./game-state";
-import { LEVEL_TERRAIN } from "./game-state";
+import { DEFAULT_PLAYER_ID, DEFAULT_RESOURCES, LEVEL_TERRAIN } from "./game-state";
 
 const GRID_COLS = 48;
 const GRID_ROWS = 48;
@@ -77,5 +77,16 @@ export function getMockGameState(): GameState {
     phase: "idle",
     territories: buildMockTerritories(),
     log: [],
+    players: {
+      [DEFAULT_PLAYER_ID]: {
+        player_id: DEFAULT_PLAYER_ID,
+        home_territory_id: `c_${HOME_COL}_${HOME_ROW}`,
+        inventory: [],
+        facilities: [],
+        owned_cards: [],
+        allied_player_ids: [],
+        resources: DEFAULT_RESOURCES,
+      },
+    },
   };
 }

@@ -2,12 +2,12 @@
  * ステータス画面
  */
 
-import { setCurrentScreen, render, gameState, ws } from "../store";
+import { setCurrentScreen, render, gameState, ws, getLocalPlayerId } from "../store";
 import {
-  DEFAULT_PLAYER_ID,
   getPlayerData,
   getPlayerFacilities,
   getPlayerOwnedCards,
+  getPlayerResources,
 } from "../shared/game-state";
 import { calculateFacilityBonuses } from "../game/facilities";
 import { getCompletedFacilitiesMap } from "../game/facility-selectors";
@@ -30,14 +30,14 @@ export function showStatusScreen(): void {
 export function renderStatus(): void {
   if (!statusEl || !gameState) return;
 
-  const facilities = getPlayerFacilities(gameState);
+  const facilities = getPlayerFacilities(gameState, getLocalPlayerId());
   const bonuses = calculateFacilityBonuses(getCompletedFacilitiesMap(facilities));
-  const ownedCards = getPlayerOwnedCards(gameState);
-  const player = getPlayerData(gameState, DEFAULT_PLAYER_ID);
-  const explorations = player?.explorations ?? gameState.explorations ?? [];
-  const explorationLv = player?.exploration_level ?? gameState.exploration_level ?? 1;
-  const explorationScore = player?.exploration_score ?? gameState.exploration_score ?? 0;
-  const res = gameState.resources ?? { food: 0, wood: 0, stone: 0, iron: 0, gold: 0 };
+  const ownedCards = getPlayerOwnedCards(gameState, getLocalPlayerId());
+  const player = getPlayerData(gameState, getLocalPlayerId());
+  const explorations = player?.explorations ?? [];
+  const explorationLv = player?.exploration_level ?? 1;
+  const explorationScore = player?.exploration_score ?? 0;
+  const res = getPlayerResources(gameState, getLocalPlayerId());
   const now = Date.now();
 
   const bonusRows = [

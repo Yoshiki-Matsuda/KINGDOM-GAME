@@ -1,4 +1,5 @@
 import type { Territory } from "./store";
+import { getLocalPlayerId } from "./store";
 
 function getDifficultyLabel(difficulty: string): string {
   switch (difficulty) {
@@ -44,7 +45,7 @@ export function renderOwnedTerritoryMenu(
   territoryId: string,
   territory: Territory,
 ): string {
-  const isOwn = territory.owner_id === "player";
+  const isOwn = territory.owner_id === getLocalPlayerId();
   return `
     <button type="button" data-action="deploy" data-territory="${territoryId}">援軍</button>
     ${isOwn ? `<button type="button" data-action="attack-from" data-territory="${territoryId}">攻撃</button>` : ""}

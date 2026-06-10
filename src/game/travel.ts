@@ -14,6 +14,8 @@ import type { TravelingUnit } from "../store";
 import { attackAction, deployAction } from "../shared/game-state";
 import { BASE_TRAVEL_TIME_PER_TILE } from "./characters";
 import { getAdjacentAttackSource } from "./combat";
+import { getPlayerHomeTerritoryId } from "./territories";
+import { getLocalPlayerId } from "../store";
 
 /** 本拠地(24,24)から領地までのマンハッタン距離（マス数） */
 export { getDistanceBetweenTerritories, getDistanceFromHome } from "./territories";
@@ -56,7 +58,8 @@ function sendTraveledAction(t: TravelingUnit): TravelingUnit | null {
             unitId: t.unitId,
             unitName: t.unitName,
             actionType: "return",
-            targetId: "",
+            targetId: getPlayerHomeTerritoryId(gameState, getLocalPlayerId()),
+            fromId: t.fromId,
             count: 0,
             monstersPerBody: [],
             speedPerBody: [],

@@ -2,12 +2,12 @@
  * フリーマーケット画面 — 魔獣・アイテム・資源をゴールドで売買
  */
 
-import { gameState, ws, render, setCurrentScreen } from "../store";
+import { gameState, ws, render, setCurrentScreen, getLocalPlayerId } from "../store";
 import { getBodyDisplayName } from "../game/characters";
 import { getItem } from "../game/items";
 import { getInventoryForState } from "../game/facility-selectors";
-import type { MarketListing, MarketItemType, Action } from "../shared/game-state";
-import { DEFAULT_PLAYER_ID, getPlayerOwnedCards } from "../shared/game-state";
+import type { MarketListing, MarketItemType, Action, BasicResourceType } from "../shared/game-state";
+import { getPlayerOwnedCards, getPlayerResources } from "../shared/game-state";
 
 let marketEl: HTMLDivElement;
 let listingContainer: HTMLDivElement;
@@ -46,8 +46,7 @@ export function createFleaMarketElement(): HTMLDivElement {
 }
 
 function getPlayerGold(): number {
-  const player = gameState.players?.[DEFAULT_PLAYER_ID];
-  return player?.resources?.gold ?? gameState.resources?.gold ?? 0;
+  return getPlayerResources(gameState, getLocalPlayerId()).gold;
 }
 
 function getListings(): MarketListing[] {
@@ -59,6 +58,10 @@ function sendMarketAction(action: Action): void {
   ws.send(JSON.stringify(action));
 }
 
+function isBasicResourceType(value: string): value is BasicResourceType {
+  return value === "food" || value === "wood" || value === "stone" || value === "iron";
+}
+
 function describeItem(item: MarketItemType): string {
   switch (item.type) {
     case "card":
@@ -68,14 +71,14 @@ function describeItem(item: MarketItemType): string {
       return `${def?.icon ?? ""} ${def?.name ?? item.item_id} x${item.count}`;
     }
     case "resource": {
-      const names: Record<string, string> = { food: "食料", wood: "木材", stone: "石材", iron: "鉄" };
-      return `${names[item.resource_type] ?? item.resource_type} x${item.amount}`;
+      const names: Record<BasicResourceType, string> = { food: "食料", wood: "木材", stone: "石材", iron: "鉄" };
+      return `${names[item.resource_type]} x${item.amount}`;
     }
   }
 }
 
 function renderBrowseTab(): void {
-  const listings = getListings().filter(l => l.seller_id !== DEFAULT_PLAYER_ID);
+  const listings = getListings().filter(l => l.seller_id !== getLocalPlayerId());
   const gold = getPlayerGold();
 
   if (listings.length === 0) {
@@ -106,7 +109,7 @@ function renderBrowseTab(): void {
 }
 
 function renderMyListingsTab(): void {
-  const listings = getListings().filter(l => l.seller_id === DEFAULT_PLAYER_ID);
+  const listings = getListings().filter(l => l.seller_id === getLocalPlayerId());
 
   if (listings.length === 0) {
     listingContainer.innerHTML = `<div class="market-empty">出品中のアイテムはありません</div>`;
@@ -130,10 +133,9 @@ function renderMyListingsTab(): void {
 }
 
 function renderSellTab(): void {
-  const ownedCards = getPlayerOwnedCards(gameState);
+  const ownedCards = getPlayerOwnedCards(gameState, getLocalPlayerId());
   const inventory = getInventoryForState(gameState);
-  const player = gameState.players?.[DEFAULT_PLAYER_ID];
-  const res = player?.resources ?? gameState.resources;
+  const res = getPlayerResources(gameState, getLocalPlayerId());
 
   listingContainer.innerHTML = `
     <div class="sell-form">
@@ -258,6 +260,7 @@ function renderSellTab(): void {
       const resourceType = targetSelect.value;
       const amount = parseInt(amountInput.value, 10);
       if (!resourceType || !amount || amount < 1) { alert("資源と数量を指定してください"); return; }
+      if (!isBasicResourceType(resourceType)) { alert("出品できない資源です"); return; }
       item = { type: "resource", resource_type: resourceType, amount };
     }
 

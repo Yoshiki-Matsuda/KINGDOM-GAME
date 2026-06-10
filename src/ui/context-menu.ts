@@ -62,8 +62,12 @@ export function closeMenu(): void {
   stopRuinTimer();
 }
 
-export function showMenuAt(x: number, y: number, territoryId: string, territory: Territory): void {
-  const t = gameState.territories.find((x) => x.id === territoryId) ?? territory;
+export function showMenuAt(x: number, y: number, territoryId: string, territory: Territory | undefined): void {
+  const t = gameState.territories.find((ter) => ter.id === territoryId) ?? territory;
+  if (!t) {
+    menuEl.hidden = true;
+    return;
+  }
 
   if (isHomeTerritory(territoryId)) {
     menuEl.hidden = true;

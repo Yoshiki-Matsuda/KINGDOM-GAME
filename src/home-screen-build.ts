@@ -27,6 +27,7 @@ interface BuildFacilityContext {
 export interface BuildFacilityResult {
   inventory: InventoryItem[];
   facilities: BuiltFacility[];
+  position: TilePosition;
   placedFacility: { col: number; row: number; facilityId: FacilityId } | null;
 }
 
@@ -45,6 +46,7 @@ export function createFacilityBuildState(
     devBuildTimeSeconds,
   } = context;
 
+  if (!selectedTile) return null;
   if (level === 1 && !selectedTile) return null;
   if (level === 1 && existingFacilities.some((facility) => facility.facility_id === facilityId)) return null;
 
@@ -95,6 +97,7 @@ export function createFacilityBuildState(
     return {
       inventory: nextInventory,
       facilities: nextFacilities,
+      position: selectedTile,
       placedFacility: null,
     };
   }
@@ -112,6 +115,7 @@ export function createFacilityBuildState(
   return {
     inventory: nextInventory,
     facilities: nextFacilities,
+    position: selectedTile,
     placedFacility: selectedTile
       ? { col: selectedTile.col, row: selectedTile.row, facilityId }
       : null,

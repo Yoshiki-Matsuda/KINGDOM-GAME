@@ -9,8 +9,8 @@ import {
   getHomeFacility,
   setHomeFacility,
   render,
+  ws,
 } from "../store";
-import { replaceLocalPlayerState } from "../store-actions";
 import { DEFAULT_BODY_MONSTER_COUNT } from "../game/characters";
 import { initHomeMapView, updateHomeMapView } from "../home-map-view";
 import {
@@ -36,6 +36,7 @@ import {
   renderFacilityCosts,
   renderPanelHeader,
 } from "../home-screen-panel";
+import { buildFacilityAction } from "../shared/game-state";
 
 let homeEl: HTMLDivElement;
 let gridContainer: HTMLDivElement;
@@ -136,20 +137,7 @@ function stopBuildingTimer(): void {
 function checkBuildingCompletion(): void {
   const facilities = getFacilitiesForState(gameState);
   const now = Date.now();
-  let changed = false;
-  const nextFacilities = facilities.map((facility) => {
-    if (facility.build_complete_at && facility.build_complete_at <= now) {
-      changed = true;
-      return {
-        ...facility,
-        build_complete_at: null,
-      };
-    }
-    return facility;
-  });
-
-  if (changed) {
-    replaceLocalPlayerState({ facilities: nextFacilities });
+  if (facilities.some((facility) => facility.build_complete_at && facility.build_complete_at <= now)) {
     renderFacilityPanel();
   }
 }
@@ -422,10 +410,11 @@ function buildFacility(facilityId: FacilityId, level: number): void {
     );
   }
 
-  replaceLocalPlayerState({
-    inventory: result.inventory,
-    facilities: result.facilities,
-  });
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    alert("サーバーに接続されていません。");
+    return;
+  }
+  ws.send(JSON.stringify(buildFacilityAction(facilityId, level, result.position)));
 
   // 選択解除
   selectedTile = null;

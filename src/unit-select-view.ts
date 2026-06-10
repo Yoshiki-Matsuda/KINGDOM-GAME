@@ -1,4 +1,4 @@
-import { formedUnitsList, gameState, travelingUnits, bodyMonsterCounts, bodySpeeds } from "./store";
+import { formedUnitsList, gameState, travelingUnits, bodyMonsterCounts, bodySpeeds, getLocalPlayerId } from "./store";
 import { getBodyDisplayName } from "./game/characters";
 import { isKcUnitReadyToDeploy, recalcUnitStats } from "./game/formation";
 import { getPlayerOwnedCards } from "./shared/game-state";
@@ -36,7 +36,7 @@ export function renderReturningUnits(container: Element, now: number, units: typ
 
 export function renderAvailableUnits(container: Element, units: typeof formedUnitsList): void {
   container.innerHTML = "";
-  const owned = getPlayerOwnedCards(gameState);
+  const owned = getPlayerOwnedCards(gameState, getLocalPlayerId());
   units.forEach((unit) => {
     const label = document.createElement("label");
     label.className = "unit-select-unit-item";

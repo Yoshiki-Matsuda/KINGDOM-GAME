@@ -3,9 +3,10 @@
  */
 
 import {
-  USE_MOCK_STATE, connectionStatus, gameState,
+  USE_MOCK_STATE, connectionStatus, gameState, getLocalPlayerId,
 } from "../store";
 import { getFacilityBonusesForState } from "../game/facility-selectors";
+import { getPlayerResources } from "../shared/game-state";
 
 let hudEl: HTMLDivElement;
 
@@ -30,14 +31,12 @@ export function renderHud(): void {
   if (bonuses.speedBonus > 0) bonusTexts.push(`SPD+${bonuses.speedBonus}`);
   if (bonuses.dropRate > 0) bonusTexts.push(`DROP+${bonuses.dropRate}%`);
 
-  const bonusDisplay = bonusTexts.length > 0 
-    ? `<span class="hud-bonus">${bonusTexts.join(" ")}</span>` 
+  const bonusDisplay = bonusTexts.length > 0
+    ? `<span class="hud-bonus">${bonusTexts.join(" ")}</span>`
     : "";
 
-  const res = gameState.resources;
-  const resDisplay = res
-    ? `<span class="hud-resources">🌾${res.food} 🪵${res.wood} 🪨${res.stone} ⛏${res.iron}</span>`
-    : "";
+  const res = getPlayerResources(gameState, getLocalPlayerId());
+  const resDisplay = `<span class="hud-resources">🌾${res.food} 🪵${res.wood} 🪨${res.stone} ⛏${res.iron}</span>`;
 
   hudEl.innerHTML = `
     <span class="hud-status" data-status="${USE_MOCK_STATE ? "mock" : connectionStatus}">${statusText}</span>

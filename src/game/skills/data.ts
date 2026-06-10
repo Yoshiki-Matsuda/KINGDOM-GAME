@@ -1,143 +1,8 @@
 /**
- * スキルシステム — キャラごとのパッシブ・アクティブ・ユニークスキル
- *
- * - パッシブスキル: 戦闘開始時に発動。味方ユニット全体に効果
- * - アクティブスキル: 攻撃時に発動。全キャラが持つ
- * - ユニークスキル: 特別キャラのみ。発動タイミングはスキル自体に定義
+ * スキルマスターデータ — キャラごとのパッシブ・アクティブ・ユニークスキル
  */
 
-/** スキルの発動タイミング */
-export type SkillTiming =
-  | "battle_start"      // 戦闘開始時（パッシブ）
-  | "on_attack"         // 攻撃時（アクティブ）
-  | "on_defend"         // 防御時
-  | "on_damage"         // ダメージを受けた時
-  | "on_kill"           // 敵を倒した時
-  | "on_death"          // 自分が倒れた時
-  | "turn_start"        // ターン開始時
-  | "turn_end"          // ターン終了時
-  | "hp_low"            // HP低下時（50%以下など）
-  | "first_attack"      // 初回攻撃時
-  | "continuous";       // 常時発動
-
-/** スキルの効果対象 */
-export type SkillTarget =
-  | "self"              // 自分のみ
-  | "ally_unit"         // ユニット内の味方全員
-  | "ally_single"       // ユニット内の味方1体（ランダム）
-  | "ally_lowest_hp"    // HP最低の味方
-  | "enemy_single"      // 敵1体（現在の対象）
-  | "enemy_all"         // 敵全体
-  | "enemy_random"      // ランダムな敵1体
-  | "enemy_highest_hp"  // HP最大の敵
-  | "both_all";         // 敵味方全員
-
-/** スキルの効果タイプ */
-export type SkillEffectType =
-  // === ステータス変更系 ===
-  | "monster_multiply"   // 魔獣数倍率
-  | "monster_add"        // 魔獣数加算
-  | "monster_set"        // 魔獣数固定値設定
-  | "speed_multiply"    // SPEED倍率
-  | "speed_add"         // SPEED加算
-  | "damage_multiply"   // ダメージ倍率
-  | "damage_add"        // ダメージ加算
-  | "damage_reduce"     // ダメージ軽減率
-  | "damage_reflect"    // ダメージ反射率
-  // === 回復・蘇生系 ===
-  | "heal"              // 固定値回復
-  | "heal_percent"      // 最大HPの%回復
-  | "revive"            // 蘇生（valueは復活時HP割合）
-  | "absorb"            // 与ダメージ吸収
-  // === 攻撃系 ===
-  | "extra_attack"      // 追加攻撃回数
-  | "true_damage"       // 固定ダメージ（防御無視）
-  | "percent_damage"    // 現在HP割合ダメージ
-  | "execute"           // 処刑（HP一定以下で即死）
-  // === 防御系 ===
-  | "shield"            // シールド付与（ダメージ吸収）
-  | "invincible"        // 無敵（1回攻撃無効）
-  | "evasion"           // 回避率上昇
-  | "counter"           // 反撃
-  // === 状態異常系 ===
-  | "poison"            // 毒（毎ターンダメージ）
-  | "burn"              // 炎上（毎ターンダメージ）
-  | "freeze"            // 凍結（行動不能）
-  | "stun"              // 気絶（行動不能）
-  | "silence"           // 沈黙（スキル使用不可）
-  | "blind"             // 暗闘（命中率低下）
-  | "weaken"            // 弱体化（ダメージ低下）
-  | "vulnerable"        // 脆弱（被ダメージ増加）
-  // === バフ・デバフ系 ===
-  | "attack_buff"       // 攻撃バフ
-  | "defense_buff"      // 防御バフ
-  | "speed_buff"        // 速度バフ
-  | "critical_buff"     // クリティカル率バフ
-  | "attack_debuff"     // 攻撃デバフ
-  | "defense_debuff"    // 防御デバフ
-  | "cleanse"           // デバフ解除
-  | "dispel"            // バフ解除（敵の）
-  // === 特殊系 ===
-  | "taunt"             // 挑発（自分を攻撃させる）
-  | "stealth"           // 隠密（ターゲットされない）
-  | "mark"              // マーク（追加ダメージ）
-  | "copy_buff"         // バフコピー
-  | "transfer_debuff"   // デバフ転送
-  | "cooldown_reduce"   // クールダウン短縮
-  | "monster_steal"      // 魔獣数奪取
-  | "summon";           // 召喚
-
-/** スキル効果の条件 */
-export interface SkillCondition {
-  type: "hp_below" | "hp_above" | "ally_count" | "enemy_count" | "has_buff" | "has_debuff" | "first_turn" | "random";
-  value: number;  // HP%、味方数、確率など
-}
-
-/** 状態異常の持続情報 */
-export interface StatusEffectDuration {
-  turns?: number;      // 持続ターン数
-  stacks?: number;     // スタック数
-  maxStacks?: number;  // 最大スタック数
-}
-
-/** スキル効果の定義 */
-export interface SkillEffect {
-  type: SkillEffectType;
-  target: SkillTarget;
-  value: number;  // 効果値（倍率 or 固定値）
-  /** 効果発動の追加条件 */
-  condition?: SkillCondition;
-  /** 状態異常の持続情報 */
-  duration?: StatusEffectDuration;
-  /** 連鎖効果（この効果発動後に追加で発動する効果） */
-  chain?: SkillEffect;
-}
-
-/** スキルの種別 */
-export type SkillCategory = "passive" | "active" | "unique";
-
-/** スキル定義 */
-export interface Skill {
-  id: string;
-  name: string;
-  description: string;
-  category: SkillCategory;
-  timing: SkillTiming;
-  effects: SkillEffect[];
-  /** 発動確率（0-100）。未指定は100（確定発動） */
-  probability?: number;
-}
-
-/** キャラクターのスキルセット */
-export interface CharacterSkills {
-  passive?: Skill;
-  active: Skill;
-  unique?: Skill;
-}
-
-// =============================================================================
-// スキルマスターデータ
-// =============================================================================
+import type { CharacterSkills, Skill } from "./types";
 
 /** パッシブスキル一覧 */
 export const PASSIVE_SKILLS: Record<string, Skill> = {
@@ -145,10 +10,10 @@ export const PASSIVE_SKILLS: Record<string, Skill> = {
   power_aura: {
     id: "power_aura",
     name: "闘気の波動",
-    description: "戦闘開始時、味方全員の魔獣数1.2倍",
+    description: "戦闘開始時、味方全員の魔獣数1.15倍",
     category: "passive",
     timing: "battle_start",
-    effects: [{ type: "monster_multiply", target: "ally_unit", value: 1.2 }],
+    effects: [{ type: "monster_multiply", target: "ally_unit", value: 1.15 }],
   },
   wind_blessing: {
     id: "wind_blessing",
@@ -169,12 +34,12 @@ export const PASSIVE_SKILLS: Record<string, Skill> = {
   rage_aura: {
     id: "rage_aura",
     name: "猛攻の気迫",
-    description: "戦闘開始時、ダメージ1.3倍（被ダメも1.2倍）",
+    description: "戦闘開始時、ダメージ1.2倍（被ダメも1.15倍）",
     category: "passive",
     timing: "battle_start",
     effects: [
-      { type: "damage_multiply", target: "ally_unit", value: 1.3 },
-      { type: "damage_reduce", target: "ally_unit", value: -0.2 },
+      { type: "damage_multiply", target: "ally_unit", value: 1.2 },
+      { type: "damage_reduce", target: "ally_unit", value: -0.15 },
     ],
   },
 
@@ -198,10 +63,10 @@ export const PASSIVE_SKILLS: Record<string, Skill> = {
   barrier_field: {
     id: "barrier_field",
     name: "結界展開",
-    description: "戦闘開始時、味方全員にシールド5付与",
+    description: "戦闘開始時、味方全員にシールド50付与（スキルLvで強化）",
     category: "passive",
     timing: "battle_start",
-    effects: [{ type: "shield", target: "ally_unit", value: 5 }],
+    effects: [{ type: "shield", target: "ally_unit", value: 50 }],
   },
 
   // === 反射・反撃系 ===
@@ -244,10 +109,10 @@ export const PASSIVE_SKILLS: Record<string, Skill> = {
   poison_aura: {
     id: "poison_aura",
     name: "瘴気の纏い",
-    description: "戦闘開始時、敵全員に毒（毎ターン2ダメージ）",
+    description: "戦闘開始時、敵全員に毒（毎ターン20ダメージ、スキルLvで強化）",
     category: "passive",
     timing: "battle_start",
-    effects: [{ type: "poison", target: "enemy_all", value: 2, duration: { turns: 3 } }],
+    effects: [{ type: "poison", target: "enemy_all", value: 20, duration: { turns: 3 } }],
   },
   freezing_presence: {
     id: "freezing_presence",
@@ -301,19 +166,19 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   critical_edge: {
     id: "critical_edge",
     name: "会心撃",
-    description: "攻撃時、30%でダメージ1.5倍",
+    description: "攻撃時、25%でダメージ1.4倍",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "damage_multiply", target: "enemy_single", value: 1.5 }],
-    probability: 30,
+    effects: [{ type: "damage_multiply", target: "enemy_single", value: 1.4 }],
+    probability: 25,
   },
   power_smash: {
     id: "power_smash",
     name: "剛撃",
-    description: "攻撃時、+5ダメージ",
+    description: "攻撃時、+80ダメージ（スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "damage_add", target: "enemy_single", value: 5 }],
+    effects: [{ type: "damage_add", target: "enemy_single", value: 80 }],
   },
   flash_cut: {
     id: "flash_cut",
@@ -335,10 +200,10 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   sharp_thrust: {
     id: "sharp_thrust",
     name: "鋭突",
-    description: "攻撃時、+2ダメージ",
+    description: "攻撃時、+50ダメージ（スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "damage_add", target: "enemy_single", value: 2 }],
+    effects: [{ type: "damage_add", target: "enemy_single", value: 50 }],
   },
   swift_blade: {
     id: "swift_blade",
@@ -371,36 +236,39 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   whirlwind: {
     id: "whirlwind",
     name: "旋風撃",
-    description: "攻撃時、敵全体に3ダメージ",
+    description: "攻撃時、敵全体に40ダメージ+現在HP3%（スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "true_damage", target: "enemy_all", value: 3 }],
+    effects: [
+      { type: "true_damage", target: "enemy_all", value: 40 },
+      { type: "percent_damage", target: "enemy_all", value: 0.03 },
+    ],
   },
 
   // === 吸収・回復系 ===
   life_drain: {
     id: "life_drain",
     name: "生命吸収",
-    description: "攻撃時、与ダメージの30%を回復",
+    description: "攻撃時、与ダメージの25%を回復",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "absorb", target: "self", value: 0.3 }],
+    effects: [{ type: "absorb", target: "self", value: 0.25 }],
   },
   monster_steal: {
     id: "monster_steal",
     name: "奪命の一撃",
-    description: "攻撃時、敵から3魔獣数を奪う",
+    description: "攻撃時、敵から30魔獣数を奪う（スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "monster_steal", target: "enemy_single", value: 3 }],
+    effects: [{ type: "monster_steal", target: "enemy_single", value: 30 }],
   },
   heal_strike: {
     id: "heal_strike",
     name: "癒しの剣",
-    description: "攻撃時、HP最低の味方を3回復",
+    description: "攻撃時、HP最低の味方を30回復（スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "heal", target: "ally_lowest_hp", value: 3 }],
+    effects: [{ type: "heal", target: "ally_lowest_hp", value: 30 }],
   },
 
   // === 防御無視・特殊ダメージ系 ===
@@ -415,10 +283,10 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   percent_cut: {
     id: "percent_cut",
     name: "割合斬り",
-    description: "攻撃時、敵の現在HPの15%ダメージ",
+    description: "攻撃時、敵の現在HPの20%ダメージ（スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "percent_damage", target: "enemy_single", value: 0.15 }],
+    effects: [{ type: "percent_damage", target: "enemy_single", value: 0.2 }],
   },
   execute_blade: {
     id: "execute_blade",
@@ -433,18 +301,18 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   blaze_edge: {
     id: "blaze_edge",
     name: "炎刃",
-    description: "攻撃時、敵に炎上付与（3ターン、毎ターン3ダメージ）",
+    description: "攻撃時、敵に炎上付与（3ターン、毎ターン30ダメージ、スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "burn", target: "enemy_single", value: 3, duration: { turns: 3 } }],
+    effects: [{ type: "burn", target: "enemy_single", value: 30, duration: { turns: 3 } }],
   },
   venom_fang: {
     id: "venom_fang",
     name: "毒牙",
-    description: "攻撃時、敵に毒付与（3ターン、毎ターン2ダメージ）",
+    description: "攻撃時、敵に毒付与（3ターン、毎ターン20ダメージ、スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "poison", target: "enemy_single", value: 2, duration: { turns: 3 } }],
+    effects: [{ type: "poison", target: "enemy_single", value: 20, duration: { turns: 3 } }],
   },
   frost_blade: {
     id: "frost_blade",
@@ -494,10 +362,10 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   shield_bash: {
     id: "shield_bash",
     name: "盾撃",
-    description: "攻撃時、自分にシールド3付与",
+    description: "攻撃時、自分にシールド30付与（スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "shield", target: "self", value: 3 }],
+    effects: [{ type: "shield", target: "self", value: 30 }],
   },
 
   // === デバフ解除・バフ解除系 ===
@@ -522,10 +390,10 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   mark_target: {
     id: "mark_target",
     name: "狙撃",
-    description: "攻撃時、敵にマーク付与（被ダメージ+5、3ターン）",
+    description: "攻撃時、敵にマーク付与（被ダメージ+50、3ターン、スキルLvで強化）",
     category: "active",
     timing: "on_attack",
-    effects: [{ type: "mark", target: "enemy_single", value: 5, duration: { turns: 3 } }],
+    effects: [{ type: "mark", target: "enemy_single", value: 50, duration: { turns: 3 } }],
   },
   taunt_blow: {
     id: "taunt_blow",
@@ -543,18 +411,18 @@ export const UNIQUE_SKILLS: Record<string, Skill> = {
   divine_spear: {
     id: "divine_spear",
     name: "神槍・絶命",
-    description: "攻撃時、ダメージ2倍",
+    description: "攻撃時、ダメージ1.6倍",
     category: "unique",
     timing: "on_attack",
-    effects: [{ type: "damage_multiply", target: "enemy_single", value: 2.0 }],
+    effects: [{ type: "damage_multiply", target: "enemy_single", value: 1.6 }],
   },
   thunder_call: {
     id: "thunder_call",
     name: "雷神招来",
-    description: "攻撃時、50%で敵全体に+10ダメージ",
+    description: "攻撃時、50%で敵全体に+100ダメージ（スキルLvで強化）",
     category: "unique",
     timing: "on_attack",
-    effects: [{ type: "true_damage", target: "enemy_all", value: 10 }],
+    effects: [{ type: "true_damage", target: "enemy_all", value: 100 }],
     probability: 50,
   },
 
@@ -625,10 +493,10 @@ export const UNIQUE_SKILLS: Record<string, Skill> = {
   plague_touch: {
     id: "plague_touch",
     name: "疫病の手",
-    description: "攻撃時、敵全員に毒付与（毎ターン5ダメージ、3ターン）",
+    description: "攻撃時、敵全員に毒付与（毎ターン50ダメージ、3ターン、スキルLvで強化）",
     category: "unique",
     timing: "on_attack",
-    effects: [{ type: "poison", target: "enemy_all", value: 5, duration: { turns: 3 } }],
+    effects: [{ type: "poison", target: "enemy_all", value: 50, duration: { turns: 3 } }],
   },
 
   // === 特殊系 ===
@@ -730,31 +598,3 @@ export const CHARACTER_SKILLS: Record<number, CharacterSkills> = {
   },
 };
 
-/** デフォルトのアクティブスキル（スキル未設定キャラ用） */
-export const DEFAULT_ACTIVE_SKILL: Skill = ACTIVE_SKILLS.sharp_thrust;
-
-/** キャラのスキルセットを取得（未定義キャラはデフォルトスキルを返す） */
-export function getCharacterSkills(index: number): CharacterSkills {
-  return CHARACTER_SKILLS[index] ?? { active: DEFAULT_ACTIVE_SKILL };
-}
-
-/** スキル情報をサーバーに送信する形式に変換 */
-export interface SkillData {
-  passive_id?: string;
-  active_id: string;
-  unique_id?: string;
-}
-
-export function getCharacterSkillData(index: number): SkillData {
-  const skills = getCharacterSkills(index);
-  return {
-    passive_id: skills.passive?.id,
-    active_id: skills.active.id,
-    unique_id: skills.unique?.id,
-  };
-}
-
-/** ユニット全体のスキルデータを取得 */
-export function getUnitSkillData(indices: number[]): SkillData[] {
-  return indices.map(getCharacterSkillData);
-}

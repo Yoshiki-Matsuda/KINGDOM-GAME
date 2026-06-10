@@ -88,8 +88,85 @@ body {
   align-items: center;
   gap: 1rem;
   font-size: 0.9rem;
-  pointer-events: none;
-  z-index: 10;
+  z-index: 500;
+  pointer-events: auto;
+}
+
+.login-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.login-modal {
+  width: min(92vw, 360px);
+  padding: 1.25rem 1.5rem 1.5rem;
+  border: 1px solid var(--border-gold);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-soft);
+}
+
+.login-modal-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+  color: var(--text-bright);
+}
+
+.login-modal-desc {
+  margin: 0 0 1rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.login-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.login-modal-field input {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-medium);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.login-modal-error {
+  margin: 0 0 0.85rem;
+  color: var(--accent-red-bright);
+  font-size: 0.85rem;
+}
+
+.login-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.login-modal-actions button {
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--border-medium);
+  border-radius: 6px;
+  background: var(--btn-bg);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.login-modal-submit,
+.login-modal-register {
+  border-color: var(--border-gold);
 }
 
 .hud-status[data-status="online"] {
@@ -99,11 +176,6 @@ body {
 }
 .hud-status[data-status="offline"] {
   color: #d44a3a;
-}
-
-.hud-hint {
-  color: #a89070;
-  font-size: 0.85rem;
 }
 
 .hud-resources {
@@ -412,12 +484,44 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
-.action-group.action-skill {
+.action-group.action-skill:not(.action-skill-ally):not(.action-skill-enemy) {
   border-left: 4px solid #9b59b6;
 }
 
-.action-group.action-attack {
+.action-group.action-skill.action-skill-ally,
+.action-group.action-attack.action-attack-ally {
+  border-left: 4px solid #5da845;
+}
+
+.action-group.action-skill.action-skill-enemy,
+.action-group.action-attack.action-attack-enemy {
   border-left: 4px solid #d44a3a;
+}
+
+.action-group.action-attack:not(.action-attack-ally):not(.action-attack-enemy) {
+  border-left: 4px solid #d44a3a;
+}
+
+.action-side-badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  line-height: 1.2;
+}
+
+.action-side-badge.action-side-ally {
+  color: #b8f0a8;
+  background: rgba(93, 168, 69, 0.25);
+  border: 1px solid rgba(93, 168, 69, 0.45);
+}
+
+.action-side-badge.action-side-enemy {
+  color: #ffb8b0;
+  background: rgba(212, 74, 58, 0.25);
+  border: 1px solid rgba(212, 74, 58, 0.45);
 }
 
 .action-group.action-phase {

@@ -1,5 +1,8 @@
-import { currentScreen, gameState, travelingUnits } from "./store";
-import { updateMapView, setMapVisible } from "./map-view";
+import {
+  USE_MOCK_STATE, authToken, currentScreen, gameState, travelingUnits,
+  isPlayerIdentityResolved,
+} from "./store";
+import { focusMapOnPlayerHome, updateMapView, setMapVisible } from "./map-view";
 import { renderHud } from "./ui/hud";
 import { renderLog } from "./ui/log-panel";
 import { updateBottomMenu } from "./ui/bottom-menu";
@@ -54,6 +57,8 @@ function getTravelingDestinations(now: number = Date.now()): TravelingDestinatio
   return Array.from(byTarget.values());
 }
 
+let mapWasVisible = false;
+
 export function createAppRenderer(elements: RenderElements): () => void {
   return () => {
     const isHome = currentScreen === "home";
@@ -67,7 +72,8 @@ export function createAppRenderer(elements: RenderElements): () => void {
     const isRanking = currentScreen === "ranking";
 
     elements.homeEl.style.display = isHome ? "flex" : "none";
-    elements.mapContainer.style.display = isMap ? "block" : "none";
+    const canShowMap = isMap && (USE_MOCK_STATE || (authToken != null && isPlayerIdentityResolved()));
+    elements.mapContainer.style.display = canShowMap ? "block" : "none";
     elements.logEl.style.display = isHistory ? "flex" : "none";
     elements.inventoryEl.style.display = isInventory ? "flex" : "none";
     elements.marketEl.style.display = isMarket ? "flex" : "none";
@@ -86,8 +92,12 @@ export function createAppRenderer(elements: RenderElements): () => void {
     renderHud();
     renderLog();
     updateBottomMenu();
-    setMapVisible(isMap);
-    updateMapView(gameState, getTravelingDestinations());
+    setMapVisible(canShowMap);
+    if (canShowMap) {
+      updateMapView(gameState, getTravelingDestinations());
+      if (!mapWasVisible) focusMapOnPlayerHome();
+    }
+    mapWasVisible = canShowMap;
     updateUnitSelectReturningList();
   };
 }

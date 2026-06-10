@@ -9,16 +9,29 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
     app_state::AppState,
+    auth,
     model::{apply_action, check_season_end, cleanup_expired_ruins, tick_resources, Action},
     persistence::save_state,
 };
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "type")]
+enum ClientEnvelope {
+    #[serde(rename = "auth")]
+    Auth { token: String },
+}
 
 pub(crate) async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
+    let Some(actor_player_id) = authenticate_socket(&mut socket, &state).await else {
+        return;
+    };
+
     let json = {
+        let _guard = state.mutation_lock.lock().await;
         let mut game = state.game.write().await;
         cleanup_expired_ruins(&mut game);
         tick_resources(&mut game);
@@ -51,16 +64,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 }
                 let Ok(action) = serde_json::from_str::<Action>(text) else { continue };
 
-                // 戦闘など重い処理で非同期ランタイムが占有され、ping や broadcast 受信が遅れると切断や Lagged が起きるため、
-                // スナップショットをスレッドプールで処理する。
-                let game_snapshot = {
-                    let g = state.game.read().await;
-                    g.clone()
-                };
+                // 同一ワールド内の状態更新は mutation_lock で直列化し、snapshot 後勝ちによる lost update を防ぐ。
+                let _guard = state.mutation_lock.lock().await;
+                let game_snapshot = { state.game.read().await.clone() };
                 let dev_auto_win = state.dev_auto_win;
+                let actor_for_apply = actor_player_id.clone();
                 let action_for_log = action.clone();
                 let new_state = match tokio::task::spawn_blocking(move || {
-                    let mut updated = apply_action(&game_snapshot, &action, dev_auto_win);
+                    let mut updated = apply_action(&game_snapshot, &actor_for_apply, &action, dev_auto_win);
                     tick_resources(&mut updated);
                     check_season_end(&mut updated);
                     updated
@@ -79,7 +90,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         .territories
                         .iter()
                         .find(|territory| territory.id == *to_territory_id)
-                        .map(|territory| territory.owner_id.as_deref() == Some("player"))
+                        .map(|territory| territory.owner_id.as_deref() == Some(actor_player_id.as_str()))
                         .unwrap_or(false);
                     println!(
                         "[kingdom-server] 攻撃処理: to={} conquered={}",
@@ -114,6 +125,28 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                     Err(RecvError::Closed) => break,
                 }
             }
+        }
+    }
+}
+
+async fn authenticate_socket(socket: &mut WebSocket, state: &AppState) -> Option<String> {
+    let msg = match socket.recv().await {
+        Some(Ok(msg)) => msg,
+        _ => return None,
+    };
+    let Ok(text) = msg.to_text() else {
+        let _ = socket.send(Message::Text(r#"{"error":"auth_required"}"#.to_string())).await;
+        return None;
+    };
+    let Ok(ClientEnvelope::Auth { token }) = serde_json::from_str::<ClientEnvelope>(text.trim()) else {
+        let _ = socket.send(Message::Text(r#"{"error":"auth_required"}"#.to_string())).await;
+        return None;
+    };
+    match auth::verify_token(&state.jwt_secret, &token) {
+        Ok(claims) => Some(claims.sub),
+        Err(_) => {
+            let _ = socket.send(Message::Text(r#"{"error":"auth_invalid"}"#.to_string())).await;
+            None
         }
     }
 }

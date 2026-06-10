@@ -12,6 +12,7 @@ import {
   setAttackSourceId,
   render,
   getNextTravelingId,
+  getLocalPlayerId,
 } from "../store";
 import type { TravelingUnit } from "../store";
 import { DEFAULT_BODY_MONSTER_COUNT, DEFAULT_BODY_SPEED, getBodyDisplayName, getCharacterSkillData, getCharacterStats } from "../game/characters";
@@ -22,6 +23,7 @@ import {
 } from "../game/formation";
 import { gameState } from "../store";
 import { getPlayerOwnedCards } from "../shared/game-state";
+import { getPlayerHomeTerritoryId } from "../game/territories";
 import { getDistanceFromHome, getTravelTimeMs, startTravelIntervalIfNeeded } from "../game/travel";
 import { closeMenu } from "./context-menu";
 import { showFormationScreen } from "./formation-screen";
@@ -223,7 +225,7 @@ function setupUnitSelect(): void {
       alert("このユニットに出撃する体がありません。");
       return;
     }
-    const owned = getPlayerOwnedCards(gameState);
+    const owned = getPlayerOwnedCards(gameState, getLocalPlayerId());
     const monstersPerBody = bodyIdxOrder.map((i) => bodyMonsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT);
     const speedPerBody = bodyIdxOrder.map((i) => bodySpeeds[i] ?? DEFAULT_BODY_SPEED);
     const bodyNames = bodyIdxOrder.map((i) => {
@@ -259,7 +261,10 @@ function setupUnitSelect(): void {
     }
     const targetId = pending.type === "attack" ? pending.toId : pending.territoryId;
     const { avgSpeed } = recalcUnitStats(unit.indices, bodyMonsterCounts, bodySpeeds);
-    const distance = getDistanceFromHome(targetId);
+    const distance = getDistanceFromHome(
+      targetId,
+      getPlayerHomeTerritoryId(gameState, getLocalPlayerId()),
+    );
     const travelTimeMs = getTravelTimeMs(distance, avgSpeed);
 
     const traveling: TravelingUnit = {
