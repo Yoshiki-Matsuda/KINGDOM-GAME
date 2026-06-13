@@ -517,11 +517,11 @@ body.login-active #app {
   text-align: left;
 }
 
-.resource-value.resource-flash-up .resource-amount {
+.resource-amount.resource-flash-up {
   animation: resource-flash-up 0.45s ease-out;
 }
 
-.resource-value.resource-flash-down .resource-amount {
+.resource-amount.resource-flash-down {
   animation: resource-flash-down 0.45s ease-out;
 }
 
@@ -554,8 +554,8 @@ body.login-active #app {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .resource-value.resource-flash-up .resource-amount,
-  .resource-value.resource-flash-down .resource-amount {
+  .resource-amount.resource-flash-up,
+  .resource-amount.resource-flash-down {
     animation: none;
   }
 }

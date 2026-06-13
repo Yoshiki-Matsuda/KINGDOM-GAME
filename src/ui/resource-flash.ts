@@ -6,14 +6,26 @@ import type { Resources } from "../shared/game-state";
 
 const TRACKED_RESOURCE_TYPES = ["food", "wood", "stone", "iron", "gold"] as const;
 
-const snapshots = new WeakMap<ParentNode, Resources>();
+// DOM要素が毎回再作成されるため、グローバルで前回値を保持
+let previousResources: Resources | null = null;
+
+/** 要素ごとのアニメーション世代管理 */
+const animationGenerations = new WeakMap<HTMLElement, number>();
+
+/** 要素ごとのanimationendリスナーを保存して削除用 */
+const listeners = new WeakMap<HTMLElement, EventListener>();
+
+let globalGeneration = 0;
 
 /** 前回描画値と比較し、増減した資源に一瞬だけフラッシュクラスを付与 */
 export function syncResourceChangeFlashes(container: ParentNode, current: Resources): void {
-  const previous = snapshots.get(container) ?? null;
-  snapshots.set(container, { ...current });
+  const previous = previousResources;
+  previousResources = { ...current };
 
   if (!previous) return;
+
+  // 各フレームでgenerationをインクリメント
+  globalGeneration++;
 
   for (const type of TRACKED_RESOURCE_TYPES) {
     const delta = current[type] - previous[type];
@@ -21,15 +33,28 @@ export function syncResourceChangeFlashes(container: ParentNode, current: Resour
 
     const el = container.querySelector<HTMLElement>(`[data-resource-type="${type}"]`);
     if (!el) continue;
+    const amount = el.querySelector<HTMLElement>(".resource-amount");
+    if (!amount) continue;
 
-    el.classList.remove("resource-flash-up", "resource-flash-down");
-    void el.offsetWidth;
-    el.classList.add(delta > 0 ? "resource-flash-up" : "resource-flash-down");
+    animationGenerations.set(amount, globalGeneration);
 
+    amount.classList.remove("resource-flash-up", "resource-flash-down");
+    void amount.offsetWidth;
+    amount.classList.add(delta > 0 ? "resource-flash-up" : "resource-flash-down");
+
+    const thisGen = globalGeneration;
     const onEnd = (): void => {
-      el.classList.remove("resource-flash-up", "resource-flash-down");
-      el.removeEventListener("animationend", onEnd);
+      if (animationGenerations.get(amount) !== thisGen) return;
+      amount.classList.remove("resource-flash-up", "resource-flash-down");
+      amount.removeEventListener("animationend", onEnd);
+      listeners.delete(amount);
     };
-    el.addEventListener("animationend", onEnd);
+    // 既存のリスナーを削除してから再登録
+    const prev = listeners.get(amount);
+    if (prev) {
+      amount.removeEventListener("animationend", prev);
+    }
+    listeners.set(amount, onEnd);
+    amount.addEventListener("animationend", onEnd);
   }
 }
