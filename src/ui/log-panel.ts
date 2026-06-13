@@ -3,9 +3,12 @@
  */
 
 import { getBodyDisplayName } from "../game/characters";
-import { getPlayerOwnedCards } from "../shared/game-state";
+import { getItem } from "../game/items";
+import { aiFactionName, getPlayerOwnedCards, isAiOwnerId } from "../shared/game-state";
 import { gameState, getLocalPlayerId } from "../store";
 import { escapeHtml } from "../utils";
+import { renderResourceDeltaHtml } from "./resource-display";
+import { renderScreenHeaderTitle } from "./screen-header";
 
 let historyList: HTMLDivElement;
 let detailModal: HTMLDivElement;
@@ -16,12 +19,15 @@ type LogType =
   | "attack" | "defeat" | "damage" | "heal" | "status"
   | "battle_start" | "battle_end" | "normal";
 
-/** 戦闘履歴 */
-interface BattleHistory {
+/** 戦闘・探索の履歴エントリ */
+interface HistoryEntry {
   id: number;
+  kind: "battle" | "explore";
   title: string;
+  /** 探索: 領地名（派遣と完了の突合） */
+  territoryName?: string;
   timestamp: Date;
-  result: "victory" | "defeat" | "ongoing";
+  result: "victory" | "defeat" | "ongoing" | "success";
   actions: ActionGroup[];
 }
 
@@ -32,12 +38,50 @@ interface ActionGroup {
   icon: string;
   lines: string[];
   side?: "ally" | "enemy";
+  attackerName?: string;
+  targetName?: string;
+  targetSide?: "ally" | "enemy";
 }
 
-function detectLogSide(line: string): "ally" | "enemy" | undefined {
-  if (line.includes("[味方]")) return "ally";
-  if (line.includes("[敵]")) return "enemy";
-  return undefined;
+function detectLogSide(line: string, invertPerspective = false): "ally" | "enemy" | undefined {
+  let side: "ally" | "enemy" | undefined;
+  if (line.includes("[味方]")) side = "ally";
+  else if (line.includes("[敵]")) side = "enemy";
+  if (!side) return undefined;
+  if (invertPerspective) return side === "ally" ? "enemy" : "ally";
+  return side;
+}
+
+function formatBattleActorLabel(actorId: string | null): string {
+  if (!actorId) return "";
+  if (isAiOwnerId(actorId)) return aiFactionName(gameState, actorId) ?? actorId;
+  return actorId;
+}
+
+/** 敵主体の侵攻ログがローカルプレイヤーへの攻撃か */
+function isInvasionAgainstLocalPlayer(line: string): boolean {
+  const localId = getLocalPlayerId();
+  return line.includes(`（${localId}）へ侵攻開始`);
+}
+
+function parseInvasionBattleTitle(line: string, actorId: string | null): string {
+  const localId = getLocalPlayerId();
+  const includeActor = actorId != null && actorId !== localId;
+  const actorLabel = includeActor ? formatBattleActorLabel(actorId) : "";
+
+  const placeMatch = line.match(/【(.+?<(\d+),(\d+)>)侵攻戦】/);
+  const invasionWithOwner = line.match(/】(.+?)が.+?（(.+?)）へ侵攻開始/);
+  const invasionPlain = line.match(/】(.+?)が(.+?)へ侵攻開始/);
+  const invasion = invasionWithOwner ?? invasionPlain;
+  if (!invasion) {
+    return placeMatch?.[1] ?? "戦闘";
+  }
+  const attacker = invasion[1];
+  const place = placeMatch?.[1] ?? "";
+  const defender = place || invasionWithOwner?.[2] || invasionPlain?.[2] || "";
+  if (actorLabel && defender) return `${actorLabel} / ${attacker} → ${defender}`;
+  if (defender) return `${attacker} → ${defender}`;
+  return place || attacker;
 }
 
 function buildPlayerUnitNames(): Set<string> {
@@ -53,9 +97,37 @@ function parseSkillCharacterName(line: string): string {
   return m?.[1] ?? "";
 }
 
+function parseAttackTargetName(line: string): string {
+  const m = line.match(/^(?:\[味方\]\s*|\[敵\]\s*)?(.+?)が(.+?)に攻撃/);
+  return m?.[2] ?? "";
+}
+
 function parseAttackAttackerName(line: string): string {
   const m = line.match(/^(?:\[味方\]\s*|\[敵\]\s*)?(.+?)が.+?に攻撃/);
   return m?.[1] ?? "";
+}
+
+function formatAttackLineHtml(
+  line: string,
+  attackerSide: "ally" | "enemy",
+  targetSide: "ally" | "enemy",
+): string | null {
+  const m = line.match(/^(?:\[味方\]\s*|\[敵\]\s*)?(.+?)が(.+?)に攻撃([！!])(.*)$/);
+  if (!m) return null;
+  const [, attacker, target, punct, rest] = m;
+  return `${renderSideBadge(attackerSide)}<span class="log-actor-name">${escapeHtml(attacker)}</span>が${renderSideBadge(targetSide)}<span class="log-actor-name">${escapeHtml(target)}</span>に攻撃${punct}${escapeHtml(rest)}`;
+}
+
+/** 行内の [味方]/[敵] テキストを色付きバッジへ置換 */
+function replaceSideTagsWithBadges(line: string): string {
+  return line
+    .split(/(\[味方\]|\[敵\])/)
+    .map((part) => {
+      if (part === "[味方]") return renderSideBadge("ally");
+      if (part === "[敵]") return renderSideBadge("enemy");
+      return escapeHtml(part);
+    })
+    .join("");
 }
 
 function resolveActionSide(
@@ -63,42 +135,162 @@ function resolveActionSide(
   actorName: string,
   characterSides: Map<string, "ally" | "enemy">,
   playerUnitNames: Set<string>,
+  invertPerspective = false,
 ): "ally" | "enemy" | undefined {
-  const tagged = detectLogSide(line);
+  const tagged = detectLogSide(line, invertPerspective);
   if (tagged) {
     if (actorName) characterSides.set(actorName, tagged);
     return tagged;
   }
   if (actorName) {
     const known = characterSides.get(actorName);
-    if (known) return known;
-    if (actorName.startsWith("味方ユニット")) return "ally";
-    if (actorName.startsWith("敵ユニット")) return "enemy";
-    if (playerUnitNames.has(actorName)) return "ally";
+    if (known) return invertPerspective ? (known === "ally" ? "enemy" : "ally") : known;
+    if (actorName.startsWith("味方ユニット")) return invertPerspective ? "enemy" : "ally";
+    if (actorName.startsWith("敵ユニット")) return invertPerspective ? "ally" : "enemy";
+    if (playerUnitNames.has(actorName)) return invertPerspective ? "enemy" : "ally";
   }
   return undefined;
 }
 
 function actionSideClass(action: ActionGroup): string {
   if (!action.side) return "";
-  if (action.type === "skill" || action.type === "attack") {
+  if (action.type === "skill" || action.type === "attack" || action.type === "phase") {
     return ` action-${action.type}-${action.side}`;
   }
   return "";
 }
 
 function actionSideBadge(action: ActionGroup): string {
-  if (!action.side || (action.type !== "skill" && action.type !== "attack")) return "";
+  if (!action.side || (action.type !== "skill" && action.type !== "attack" && action.type !== "phase")) return "";
   const label = action.side === "ally" ? "味方" : "敵";
   return `<span class="action-side-badge action-side-${action.side}">${label}</span>`;
 }
 
+function renderSideBadge(side: "ally" | "enemy"): string {
+  const label = side === "ally" ? "味方" : "敵";
+  return `<span class="action-side-badge action-side-${side}">${label}</span>`;
+}
+
+function resolveCharacterSide(
+  name: string,
+  characterSides: Map<string, "ally" | "enemy">,
+  playerUnitNames: Set<string>,
+  invertPerspective: boolean,
+): "ally" | "enemy" | undefined {
+  if (!name) return undefined;
+  const known = characterSides.get(name);
+  if (known) return invertPerspective ? (known === "ally" ? "enemy" : "ally") : known;
+  if (name.startsWith("味方ユニット")) return invertPerspective ? "enemy" : "ally";
+  if (name.startsWith("敵ユニット")) return invertPerspective ? "ally" : "enemy";
+  if (playerUnitNames.has(name)) return invertPerspective ? "enemy" : "ally";
+  return undefined;
+}
+
+function resolveTargetSide(
+  targetName: string,
+  attackerSide: "ally" | "enemy" | undefined,
+  characterSides: Map<string, "ally" | "enemy">,
+  playerUnitNames: Set<string>,
+  invertPerspective: boolean,
+): "ally" | "enemy" | undefined {
+  const known = resolveCharacterSide(targetName, characterSides, playerUnitNames, invertPerspective);
+  if (known) return known;
+  if (attackerSide) return attackerSide === "ally" ? "enemy" : "ally";
+  return undefined;
+}
+
+function registerEnemyRosterName(
+  line: string,
+  characterSides: Map<string, "ally" | "enemy">,
+): void {
+  const m = line.match(/^\[敵\]\s+(.+?)（/);
+  if (m) characterSides.set(m[1], "enemy");
+}
+
+function renderAttackTitle(action: ActionGroup): string {
+  if (action.attackerName && action.targetName && action.side && action.targetSide) {
+    return `${renderSideBadge(action.side)}<span class="action-actor-name">${escapeHtml(action.attackerName)}</span>`
+      + `<span class="action-arrow">→</span>`
+      + `${renderSideBadge(action.targetSide)}<span class="action-actor-name">${escapeHtml(action.targetName)}</span>`;
+  }
+  return escapeHtml(action.title);
+}
+
+function renderActionTitle(action: ActionGroup): string {
+  if (action.type === "attack") return renderAttackTitle(action);
+  return escapeHtml(action.title);
+}
+
 /** サーバー内部用のフェーズ区切り（ユーザー向けログには出さない） */
 function isHiddenBattleDelimiter(line: string): boolean {
-  if (line.startsWith("--- 戦利品 ---") || line.startsWith("--- 魔獣入手 ---")) {
+  if (
+    line.startsWith("--- 戦利品 ---") ||
+    line.startsWith("--- 魔獣入手 ---") ||
+    line.startsWith("--- 敵編成 ---")
+  ) {
     return false;
   }
   return /^--- .+ ---$/.test(line);
+}
+
+/** 戦闘フェーズ区切りをアクショングループに変換（スタートアップスキルとターン行の混同を防ぐ） */
+function pushCurrentAction(entry: HistoryEntry, action: ActionGroup | null): ActionGroup | null {
+  if (action) {
+    entry.actions.push(action);
+  }
+  return null;
+}
+
+function handleBattlePhaseDelimiter(
+  line: string,
+): { handled: boolean; currentAction: ActionGroup | null } {
+  if (line === "--- スタートアップフェーズ ---") {
+    return {
+      handled: true,
+      currentAction: {
+        type: "phase",
+        title: "スタートアップ",
+        icon: "✨",
+        lines: [],
+      },
+    };
+  }
+  if (line === "--- 戦闘フェーズ ---") {
+    return {
+      handled: true,
+      currentAction: {
+        type: "phase",
+        title: "戦闘フェーズ",
+        icon: "⚔️",
+        lines: [],
+      },
+    };
+  }
+  const turnMatch = line.match(/^--- Turn (\d+) ---$/);
+  if (turnMatch) {
+    return {
+      handled: true,
+      currentAction: {
+        type: "phase",
+        title: `ターン ${turnMatch[1]}`,
+        icon: "🔄",
+        lines: [],
+      },
+    };
+  }
+  const waveMatch = line.match(/^--- 第(\d+)戦 ---$/);
+  if (waveMatch) {
+    return {
+      handled: true,
+      currentAction: {
+        type: "phase",
+        title: `第${waveMatch[1]}戦`,
+        icon: "🌊",
+        lines: [],
+      },
+    };
+  }
+  return { handled: false, currentAction: null };
 }
 
 /** 侵攻開始を先頭に並べ替え（旧ログでスキルが前に付いていた場合の補正） */
@@ -177,8 +369,9 @@ function getLogIcon(type: LogType): string {
   }
 }
 
-/** 占領/失敗の直後に続く戦利品・魔獣入手（同一攻撃の結果） */
+/** 占領/失敗の直後に続く戦利品・魔獣入手・占領報酬（同一攻撃の結果） */
 function isLootRelatedLine(line: string): boolean {
+  if (line.startsWith("占領報酬:")) return true;
   if (line.startsWith("--- 戦利品 ---")) return true;
   if (line.startsWith("--- 魔獣入手 ---")) return true;
   if (line.includes("を入手！")) return true;
@@ -186,24 +379,139 @@ function isLootRelatedLine(line: string): boolean {
   return false;
 }
 
+function isIgnorableSystemLine(line: string): boolean {
+  return line === "スタミナが足りない魔獣が含まれています。";
+}
+
+function formatConquestRewardLine(line: string): string | null {
+  const m = line.match(/^占領報酬:\s*食料\+(\d+)・木\+(\d+)・石\+(\d+)・鉄\+(\d+)/);
+  if (!m) return null;
+  const parts = [
+    renderResourceDeltaHtml("food", Number(m[1])),
+    renderResourceDeltaHtml("wood", Number(m[2])),
+    renderResourceDeltaHtml("stone", Number(m[3])),
+    renderResourceDeltaHtml("iron", Number(m[4])),
+  ];
+  return `<span class="log-conquest-reward"><span class="log-conquest-reward-label">占領報酬:</span> ${parts.join(" ")}</span>`;
+}
+
+function formatLootPickupLine(line: string): string | null {
+  const goldMatch = line.match(/^ゴールド\+(\d+) を入手！$/);
+  if (goldMatch) {
+    return `<span class="log-loot-pickup">${renderResourceDeltaHtml("gold", Number(goldMatch[1]), "resource-value resource-delta log-loot-gold")} <span class="log-loot-suffix">を入手！</span></span>`;
+  }
+  const itemMatch = line.match(/^(.+?)x(\d+) を入手！$/);
+  if (!itemMatch) return null;
+  const itemKey = itemMatch[1];
+  const count = itemMatch[2];
+  const def = getItem(itemKey);
+  const label = def?.name ?? itemKey;
+  const icon = def?.icon ?? "📦";
+  return `<span class="log-loot-pickup"><span class="log-loot-icon" aria-hidden="true">${icon}</span> <span class="log-loot-name">${escapeHtml(label)}</span><span class="resource-delta-amount">x${count}</span> <span class="log-loot-suffix">を入手！</span></span>`;
+}
+
+function formatExploreRewardLine(line: string): string | null {
+  const m = line.match(/^(.+?)の探索が完了。食料\+(\d+)・木\+(\d+)・石\+(\d+)・鉄\+(\d+)$/);
+  if (!m) return null;
+  const parts = [
+    renderResourceDeltaHtml("food", Number(m[2])),
+    renderResourceDeltaHtml("wood", Number(m[3])),
+    renderResourceDeltaHtml("stone", Number(m[4])),
+    renderResourceDeltaHtml("iron", Number(m[5])),
+  ];
+  return `<span class="log-explore-reward"><span class="log-explore-reward-label">${escapeHtml(m[1])}の探索完了:</span> ${parts.join(" ")}</span>`;
+}
+
+function isExploreDispatchLine(line: string): boolean {
+  return /探索を.+へ派遣しました。/.test(line);
+}
+
+function parseExploreDispatchLine(line: string): { territory: string } | null {
+  const m = line.match(/探索を(.+?)へ派遣しました。/);
+  if (!m) return null;
+  return { territory: m[1] };
+}
+
+function parseExploreCompleteLine(line: string): {
+  territory: string;
+  food: number;
+  wood: number;
+  stone: number;
+  iron: number;
+} | null {
+  const m = line.match(/^(.+?)の探索が完了。食料\+(\d+)・木\+(\d+)・石\+(\d+)・鉄\+(\d+)$/);
+  if (!m) return null;
+  return {
+    territory: m[1],
+    food: Number(m[2]),
+    wood: Number(m[3]),
+    stone: Number(m[4]),
+    iron: Number(m[5]),
+  };
+}
+
+function isExploreLevelUpLine(line: string): boolean {
+  return line.includes("探索経験が溜まり、探索レベルが");
+}
+
+function findPendingExploreEntry(histories: HistoryEntry[], territory: string): HistoryEntry | undefined {
+  for (let i = histories.length - 1; i >= 0; i--) {
+    const h = histories[i];
+    if (h.kind === "explore" && h.result === "ongoing" && h.territoryName === territory) {
+      return h;
+    }
+  }
+  return undefined;
+}
+
+function completeExploreEntry(entry: HistoryEntry, line: string, tsMs: number | null): void {
+  entry.result = "success";
+  entry.actions.push({
+    type: "result",
+    title: "探索完了",
+    icon: "✅",
+    lines: [line],
+  });
+  if (tsMs != null) {
+    entry.timestamp = new Date(tsMs);
+  }
+}
+function formatBattleLogLineHtml(line: string, action?: ActionGroup): string {
+  if (action?.type === "attack" && action.side && action.targetSide) {
+    const attackHtml = formatAttackLineHtml(line, action.side, action.targetSide);
+    if (attackHtml) return attackHtml;
+  }
+  const formatted = formatConquestRewardLine(line) ?? formatExploreRewardLine(line) ?? formatLootPickupLine(line);
+  if (formatted) return formatted;
+  if (line.includes("[味方]") || line.includes("[敵]")) {
+    return replaceSideTagsWithBadges(line);
+  }
+  return escapeHtml(line);
+}
+
 /** 同一戦闘とみなすタイムスタンプの最大差（ミリ秒） */
 const BATTLE_GROUP_GAP_MS = 5000;
 
-/** ログを戦闘履歴にパース */
-function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
-  const histories: BattleHistory[] = [];
-  let currentBattle: BattleHistory | null = null;
+/** ログを戦闘・探索履歴にパース */
+function parseLogsToHistory(rawLogs: string[]): HistoryEntry[] {
+  const histories: HistoryEntry[] = [];
+  let currentBattle: HistoryEntry | null = null;
+  let currentExplore: HistoryEntry | null = null;
   let currentAction: ActionGroup | null = null;
-  let battleId = 0;
+  let historyId = 0;
   let postBattleLootMode = false;
-  /** 他プレイヤーの戦闘ログを読み飛ばす */
+  let postExploreLevelUpMode = false;
+  let lastCompletedExplore: HistoryEntry | null = null;
+  /** 他プレイヤーの戦闘ログを読み飛ばす（自領への敵侵攻は除く） */
   let skippingBattle = false;
+  /** 敵主体ログを防衛視点で表示 */
+  let viewingAsDefender = false;
   /** 現在の戦闘グループの基準タイムスタンプ */
   let currentBattleTsMs: number | null = null;
   const playerUnitNames = buildPlayerUnitNames();
   let characterSides = new Map<string, "ally" | "enemy">();
 
-  /** 進行中の魔獣入手ブロックを確定して histories へ追加 */
+  /** 進行中の戦闘を確定して histories へ追加 */
   function finalizeCurrent() {
     if (!currentBattle) return;
     if (currentAction) currentBattle.actions.push(currentAction);
@@ -213,6 +521,12 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
     currentBattleTsMs = null;
   }
 
+  function finalizeCurrentExplore() {
+    if (!currentExplore) return;
+    histories.push(currentExplore);
+    currentExplore = null;
+  }
+
   let lastTsMs: number | null = null;
   for (let lineIdx = 0; lineIdx < rawLogs.length; lineIdx++) {
     const parsed = parseLogLine(rawLogs[lineIdx]);
@@ -220,18 +534,107 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
     const line = lineBody;
     const tsMs = parsed.tsMs ?? lastTsMs;
     if (parsed.tsMs != null) lastTsMs = parsed.tsMs;
-    if (isHiddenBattleDelimiter(line)) {
+    if (isIgnorableSystemLine(line)) {
       continue;
     }
+    registerEnemyRosterName(line, characterSides);
     const type = classifyLog(line);
 
-    if (type === "battle_start") {
-      skippingBattle = !isOwnBattleActor(actorId);
+    // 他プレイヤー/AI主体: 自領への侵攻のみ戦歴に載せる
+    if (actorId && !isOwnBattleActor(actorId)) {
+      if (type === "battle_start") {
+        if (!isInvasionAgainstLocalPlayer(line)) {
+          skippingBattle = true;
+          viewingAsDefender = false;
+        } else {
+          skippingBattle = false;
+          viewingAsDefender = true;
+        }
+      }
       if (skippingBattle) {
-        postBattleLootMode = false;
         continue;
       }
+    } else {
+      viewingAsDefender = false;
+    }
+
+    if (type === "battle_start") {
+      skippingBattle = false;
     } else if (skippingBattle) {
+      continue;
+    }
+
+    if (actorId && !isOwnBattleActor(actorId)) {
+      if (isExploreDispatchLine(line) || parseExploreCompleteLine(line) || isExploreLevelUpLine(line)) {
+        continue;
+      }
+    }
+
+    if (postExploreLevelUpMode) {
+      if (isExploreLevelUpLine(line) && (!actorId || isOwnBattleActor(actorId))) {
+        const target = lastCompletedExplore ?? histories.filter((h) => h.kind === "explore").at(-1);
+        if (target) {
+          target.actions.push({
+            type: "phase",
+            title: "探索レベルアップ",
+            icon: "⬆️",
+            lines: [line],
+          });
+        }
+        continue;
+      }
+      postExploreLevelUpMode = false;
+      lastCompletedExplore = null;
+    }
+
+    if (isExploreDispatchLine(line) && (!actorId || isOwnBattleActor(actorId))) {
+      finalizeCurrentExplore();
+      finalizeCurrent();
+      const dispatch = parseExploreDispatchLine(line)!;
+      currentExplore = {
+        id: historyId++,
+        kind: "explore",
+        title: dispatch.territory,
+        territoryName: dispatch.territory,
+        timestamp: new Date(tsMs ?? Date.now()),
+        result: "ongoing",
+        actions: [{
+          type: "phase",
+          title: "探索派遣",
+          icon: "🧭",
+          lines: [line],
+        }],
+      };
+      continue;
+    }
+
+    const exploreComplete = parseExploreCompleteLine(line);
+    if (exploreComplete && (!actorId || isOwnBattleActor(actorId))) {
+      finalizeCurrent();
+      finalizeCurrentExplore();
+      let entry: HistoryEntry;
+      const pending = findPendingExploreEntry(histories, exploreComplete.territory);
+      if (currentExplore && currentExplore.territoryName === exploreComplete.territory) {
+        entry = currentExplore;
+        currentExplore = null;
+      } else if (pending) {
+        entry = pending;
+        histories.splice(histories.indexOf(pending), 1);
+      } else {
+        entry = {
+          id: historyId++,
+          kind: "explore",
+          title: exploreComplete.territory,
+          territoryName: exploreComplete.territory,
+          timestamp: new Date(tsMs ?? Date.now()),
+          result: "ongoing",
+          actions: [],
+        };
+      }
+      completeExploreEntry(entry, line, tsMs);
+      histories.push(entry);
+      lastCompletedExplore = entry;
+      postExploreLevelUpMode = true;
       continue;
     }
 
@@ -283,9 +686,10 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
       continue;
     }
 
-    // タイムスタンプが大きく離れていたら別イベントとして分割
+    // タイムスタンプが大きく離れていたら別イベントとして分割（戦利品収集中は除く）
     if (
       currentBattle &&
+      !postBattleLootMode &&
       tsMs != null &&
       currentBattleTsMs != null &&
       Math.abs(tsMs - currentBattleTsMs) > BATTLE_GROUP_GAP_MS &&
@@ -298,8 +702,26 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
       }
     }
 
+    if (line.startsWith("--- 敵編成 ---")) {
+      if (!currentBattle) {
+        continue;
+      }
+      if (currentAction) {
+        currentBattle.actions.push(currentAction);
+      }
+      currentAction = {
+        type: "phase",
+        title: "敵編成",
+        icon: "👹",
+        lines: [],
+        side: "enemy",
+      };
+      continue;
+    }
+
     if (type === "battle_start") {
       postBattleLootMode = false;
+      finalizeCurrentExplore();
       characterSides = new Map();
       let preludeActions: ActionGroup[] = [];
       if (currentBattle) {
@@ -315,22 +737,24 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
         currentBattleTsMs = null;
       }
 
-      let title = "戦闘";
-      const newFormatMatch = line.match(/【(.+?<\d+,\d+>)侵攻戦】/);
-      if (newFormatMatch) {
-        title = newFormatMatch[1];
-      } else {
-        const oldFormatMatch = line.match(/【(.+?)侵攻戦】/);
-        if (oldFormatMatch) {
-          title = oldFormatMatch[1];
+      let title = parseInvasionBattleTitle(line, actorId);
+      if (title === "戦闘") {
+        const newFormatMatch = line.match(/【(.+?<\d+,\d+>)侵攻戦】/);
+        if (newFormatMatch) {
+          title = newFormatMatch[1];
         } else {
-          const attackMatch = line.match(/ユニット\d+が(.+?)を攻撃しました/);
-          if (attackMatch) {
-            title = attackMatch[1];
+          const oldFormatMatch = line.match(/【(.+?)侵攻戦】/);
+          if (oldFormatMatch) {
+            title = oldFormatMatch[1];
           } else {
-            const invasionMatch = line.match(/が(.+?)へ侵攻/);
-            if (invasionMatch) {
-              title = invasionMatch[1];
+            const attackMatch = line.match(/ユニット\d+が(.+?)を攻撃しました/);
+            if (attackMatch) {
+              title = attackMatch[1];
+            } else {
+              const invasionMatch = line.match(/が(.+?)へ侵攻/);
+              if (invasionMatch) {
+                title = invasionMatch[1];
+              }
             }
           }
         }
@@ -338,7 +762,8 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
 
       currentBattleTsMs = tsMs ?? Date.now();
       currentBattle = {
-        id: battleId++,
+        id: historyId++,
+        kind: "battle",
         title: title,
         timestamp: new Date(currentBattleTsMs),
         result: "ongoing",
@@ -354,30 +779,48 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
     }
 
     if (!currentBattle) {
-      currentBattleTsMs = tsMs ?? Date.now();
-      currentBattle = {
-        id: battleId++,
-        title: "戦闘",
-        timestamp: new Date(currentBattleTsMs),
-        result: "ongoing",
-        actions: [],
-      };
+      continue;
+    }
+
+    const phaseDelimiter = handleBattlePhaseDelimiter(line);
+    if (phaseDelimiter.handled) {
+      currentAction = pushCurrentAction(currentBattle, currentAction);
+      currentAction = phaseDelimiter.currentAction;
+      continue;
+    }
+
+    if (isHiddenBattleDelimiter(line)) {
+      continue;
     }
 
     if (type === "battle_end") {
       if (currentAction) {
         currentBattle.actions.push(currentAction);
       }
-      const isVictory = line.includes("占領しました");
+      const isVictory = viewingAsDefender
+        ? line.includes("攻撃失敗") || line.includes("防衛に成功")
+        : line.includes("占領しました");
       const isPartialOcc = line.includes("占領には至らなかった");
-      if (isVictory) {
+      if (viewingAsDefender && line.includes("占領しました")) {
+        currentBattle.result = "defeat";
+      } else if (isVictory) {
         currentBattle.result = "victory";
       } else {
         currentBattle.result = "defeat";
       }
       currentAction = {
         type: "result",
-        title: isVictory ? "占領成功" : isPartialOcc ? "敵撃破・未占領" : "攻撃失敗",
+        title: viewingAsDefender
+          ? isVictory
+            ? "防衛成功"
+            : isPartialOcc
+              ? "防衛（部分）"
+              : "防衛失敗"
+          : isVictory
+            ? "占領成功"
+            : isPartialOcc
+              ? "敵撃破・未占領"
+              : "攻撃失敗",
         icon: isVictory ? "🏆" : isPartialOcc ? "🛡️" : "💀",
         lines: [line],
       };
@@ -393,12 +836,10 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
     }
 
     if (type === "skill_passive" || type === "skill_active" || type === "skill_unique") {
-      if (currentAction) {
-        currentBattle.actions.push(currentAction);
-      }
+      currentAction = pushCurrentAction(currentBattle, currentAction);
       const skillMatch = line.match(/「(.+?)」/);
       const charName = parseSkillCharacterName(line);
-      const side = resolveActionSide(line, charName, characterSides, playerUnitNames);
+      const side = resolveActionSide(line, charName, characterSides, playerUnitNames, viewingAsDefender);
       currentAction = {
         type: "skill",
         title: `${charName}の${skillMatch?.[1] ?? "スキル"}`,
@@ -414,14 +855,27 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
         currentBattle.actions.push(currentAction);
       }
       const attackerName = parseAttackAttackerName(line);
-      const attackMatch = line.match(/^(?:\[味方\]\s*|\[敵\]\s*)?(.+?)が(.+?)に攻撃/);
-      const side = resolveActionSide(line, attackerName, characterSides, playerUnitNames);
+      const targetName = parseAttackTargetName(line);
+      const side = resolveActionSide(line, attackerName, characterSides, playerUnitNames, viewingAsDefender);
+      const targetSide = resolveTargetSide(
+        targetName,
+        side,
+        characterSides,
+        playerUnitNames,
+        viewingAsDefender,
+      );
+      if (targetName && targetSide) {
+        characterSides.set(targetName, targetSide);
+      }
       currentAction = {
         type: "attack",
-        title: attackMatch ? `${attackMatch[1]} → ${attackMatch[2]}` : "攻撃",
+        title: targetName ? `${attackerName} → ${targetName}` : "攻撃",
         icon: "⚔️",
         lines: [line],
         side,
+        attackerName,
+        targetName: targetName || undefined,
+        targetSide,
       };
       continue;
     }
@@ -438,10 +892,8 @@ function parseLogsToHistory(rawLogs: string[]): BattleHistory[] {
     }
   }
 
-  if (currentBattle) {
-    if (currentAction) currentBattle.actions.push(currentAction);
-    histories.push(currentBattle);
-  }
+  finalizeCurrent();
+  finalizeCurrentExplore();
 
   return histories;
 }
@@ -454,43 +906,53 @@ function formatTime(date: Date): string {
   return `${h}:${m}:${s}`;
 }
 
-/** 戦闘履歴の1エントリをレンダリング */
-function renderHistoryCard(battle: BattleHistory): string {
-  const resultClass = battle.result === "victory" ? "history-victory" : 
-                      battle.result === "defeat" ? "history-defeat" : "history-ongoing";
-  const resultIcon = battle.result === "victory" ? "🏆" : 
-                     battle.result === "defeat" ? "💀" : "⚔️";
-  
-  const timeStr = formatTime(battle.timestamp);
-  
+/** 履歴の1エントリをレンダリング */
+function renderHistoryCard(entry: HistoryEntry): string {
+  const resultClass = entry.kind === "explore"
+    ? entry.result === "success" ? "history-explore" : "history-ongoing"
+    : entry.result === "victory" ? "history-victory"
+      : entry.result === "defeat" ? "history-defeat" : "history-ongoing";
+  const resultIcon = entry.kind === "explore"
+    ? "🧭"
+    : entry.result === "victory" ? "🏆"
+      : entry.result === "defeat" ? "💀" : "⚔️";
+  const title = entry.kind === "explore"
+    ? `探索: ${entry.title}`
+    : entry.title;
+
+  const timeStr = formatTime(entry.timestamp);
+
   return `
-    <div class="history-card ${resultClass}" data-battle-id="${battle.id}">
+    <div class="history-card ${resultClass}" data-battle-id="${entry.id}">
       <span class="history-card-time">${timeStr}</span>
       <span class="history-card-icon">${resultIcon}</span>
-      <span class="history-card-title">${escapeHtml(battle.title)}</span>
+      <span class="history-card-title">${escapeHtml(title)}</span>
     </div>
   `;
 }
 
-/** 戦闘詳細モーダルを表示 */
-function showBattleDetail(battle: BattleHistory): void {
-  const resultClass = battle.result === "victory" ? "detail-victory" : 
-                      battle.result === "defeat" ? "detail-defeat" : "detail-ongoing";
+/** 戦闘・探索詳細モーダルを表示 */
+function showHistoryDetail(entry: HistoryEntry): void {
+  const resultClass = entry.kind === "explore"
+    ? entry.result === "success" ? "detail-explore" : "detail-ongoing"
+    : entry.result === "victory" ? "detail-victory"
+      : entry.result === "defeat" ? "detail-defeat" : "detail-ongoing";
+  const modalTitle = entry.kind === "explore" ? `探索: ${entry.title}` : entry.title;
   
   detailModal.innerHTML = `
     <div class="detail-overlay" data-close="true">
       <div class="detail-modal ${resultClass}">
         <div class="detail-header">
-          <h2 class="detail-title">${escapeHtml(battle.title)}</h2>
+          <h2 class="detail-title">${escapeHtml(modalTitle)}</h2>
           <button class="detail-close" data-close="true">✕</button>
         </div>
         <div class="detail-content">
-          ${sortBattleActions(battle.actions).map((action, idx) => `
+          ${sortBattleActions(entry.actions).map((action, idx) => `
             <div class="action-group action-${action.type}${actionSideClass(action)}" data-action-idx="${idx}">
               <div class="action-header">
                 <span class="action-icon">${action.icon}</span>
-                ${actionSideBadge(action)}
-                <span class="action-title">${escapeHtml(action.title)}</span>
+                ${action.type === "attack" ? "" : actionSideBadge(action)}
+                <span class="action-title">${renderActionTitle(action)}</span>
                 <span class="action-toggle">▼</span>
               </div>
               <div class="action-body">
@@ -501,7 +963,7 @@ function showBattleDetail(battle: BattleHistory): void {
                   const icon = getLogIcon(type);
                   return `<div class="action-line action-line-${type}">
                     ${icon ? `<span class="line-icon">${icon}</span>` : ""}
-                    <span class="line-text">${escapeHtml(line)}</span>
+                    <span class="line-text">${formatBattleLogLineHtml(line, action)}</span>
                   </div>`;
                 }).join("")}
               </div>
@@ -530,7 +992,7 @@ function showBattleDetail(battle: BattleHistory): void {
   });
 }
 
-let battleHistories: BattleHistory[] = [];
+let historyEntries: HistoryEntry[] = [];
 
 export function createLogElement(): HTMLDivElement {
   const wrapper = document.createElement("div");
@@ -545,8 +1007,7 @@ export function createLogElement(): HTMLDivElement {
   header.className = "history-header";
   header.innerHTML = `
     <div class="history-title">
-      <span class="history-title-icon">📜</span>
-      <span>戦闘履歴</span>
+      ${renderScreenHeaderTitle("history", "戦歴")}
     </div>
   `;
   
@@ -559,10 +1020,10 @@ export function createLogElement(): HTMLDivElement {
   historyList.addEventListener("click", (e) => {
     const card = (e.target as HTMLElement).closest(".history-card");
     if (card) {
-      const battleId = parseInt(card.getAttribute("data-battle-id") ?? "0");
-      const battle = battleHistories.find(b => b.id === battleId);
-      if (battle) {
-        showBattleDetail(battle);
+      const entryId = parseInt(card.getAttribute("data-battle-id") ?? "0");
+      const entry = historyEntries.find((b) => b.id === entryId);
+      if (entry) {
+        showHistoryDetail(entry);
       }
     }
   });
@@ -572,6 +1033,10 @@ export function createLogElement(): HTMLDivElement {
 
 export function renderLog(): void {
   const logs = gameState.log ?? [];
-  battleHistories = parseLogsToHistory(logs);
-  historyList.innerHTML = battleHistories.slice().reverse().map(renderHistoryCard).join("");
+  historyEntries = parseLogsToHistory(logs);
+  historyList.innerHTML = historyEntries
+    .slice()
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    .map(renderHistoryCard)
+    .join("");
 }

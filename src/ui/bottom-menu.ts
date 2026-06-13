@@ -2,10 +2,10 @@
  * 画面下部のメニューバー
  */
 
-import { setCurrentScreen, currentScreen, render } from "../store";
+import { setCurrentScreen, currentScreen, gameMode, render } from "../store";
 import { showHomeScreen } from "./home-screen";
 import { showInventoryScreen } from "./inventory-screen";
-import { showFormationScreen } from "./formation-screen";
+import { showFormationHub } from "./formation-screen";
 import { showFleaMarketScreen } from "./flea-market-screen";
 import { showAllianceScreen } from "./alliance-screen";
 import { showStatusScreen } from "./status-screen";
@@ -23,7 +23,7 @@ export function createBottomMenuElement(): HTMLDivElement {
     <button class="bottom-menu-item" data-action="map" title="世界地図">
       <span class="bottom-menu-icon"><img src="/icons/menu-map.png" alt="地図" class="game-icon"></span>
     </button>
-    <button class="bottom-menu-item" data-action="formation" title="ユニット編成">
+    <button class="bottom-menu-item" data-action="formation" title="編成">
       <span class="bottom-menu-icon"><img src="/icons/menu-formation.png" alt="編成" class="game-icon"></span>
     </button>
     <button class="bottom-menu-item" data-action="alliance" title="同盟">
@@ -36,7 +36,7 @@ export function createBottomMenuElement(): HTMLDivElement {
       <span class="bottom-menu-icon"><img src="/icons/menu-history.png" alt="戦歴" class="game-icon"></span>
     </button>
     <button class="bottom-menu-item" data-action="status" title="ステータス">
-      <span class="bottom-menu-icon"><img src="/icons/menu-status.png" alt="情報" class="game-icon"></span>
+      <span class="bottom-menu-icon"><img src="/icons/menu-status.png" alt="ステータス" class="game-icon"></span>
     </button>
     <button class="bottom-menu-item" data-action="inventory" title="所持品">
       <span class="bottom-menu-icon"><img src="/icons/menu-inventory.png" alt="所持品" class="game-icon"></span>
@@ -58,7 +58,7 @@ export function createBottomMenuElement(): HTMLDivElement {
         render();
         break;
       case "formation":
-        showFormationScreen();
+        showFormationHub();
         break;
       case "alliance":
         showAllianceScreen();
@@ -99,5 +99,9 @@ function updateActiveState(): void {
 }
 
 export function updateBottomMenu(): void {
+  const allianceBtn = menuBar?.querySelector('[data-action="alliance"]') as HTMLElement | null;
+  if (allianceBtn) {
+    allianceBtn.style.display = gameMode === "pve" ? "none" : "";
+  }
   updateActiveState();
 }

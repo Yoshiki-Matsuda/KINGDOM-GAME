@@ -199,7 +199,7 @@ pub(super) fn apply_donate_alliance(
         );
     }
     alliances[ai].level = new_level;
-    let mut out = build_game_state(state, state.turn, state.territories.clone(), log.clone(), players);
+    let mut out = build_game_state(state, state.territories.clone(), log.clone(), players);
     out.alliances = alliances;
     out
 }

@@ -34,12 +34,12 @@ pub fn process_level_up(
         }
         *current_exp -= need;
         *current_level += 1;
-        *status_points = status_points.saturating_add(3);
+        *status_points = status_points.saturating_add(10);
         leveled = true;
         push_log(
             log,
             format!(
-                "「{}」がLv{}にアップ！ステータスポイント+3",
+                "「{}」がLv{}にアップ！ステータスポイント+10",
                 log_name, *current_level
             ),
         );

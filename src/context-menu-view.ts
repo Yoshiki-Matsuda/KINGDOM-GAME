@@ -1,6 +1,7 @@
-import { isEnemyHomeTile } from "./game/territories";
+import { isEnemyHomeTile, isAiOwnerId } from "./game/territories";
 import type { Territory } from "./store";
-import { getLocalPlayerId } from "./store";
+import { gameState, getLocalPlayerId } from "./store";
+import { aiFactionName } from "./shared/game-state";
 
 function getDifficultyLabel(difficulty: string): string {
   switch (difficulty) {
@@ -45,11 +46,15 @@ export function renderRuinContextMenu(
 export function renderOwnedTerritoryMenu(
   territoryId: string,
   territory: Territory,
+  attackable: boolean,
 ): string {
   const isOwn = territory.owner_id === getLocalPlayerId();
+  const canExplore = isOwn && !territory.is_base;
+  const canAttackTarget = attackable && isOwn && !territory.is_base;
   return `
     <button type="button" data-action="deploy" data-territory="${territoryId}">援軍</button>
-    ${isOwn ? `<button type="button" data-action="attack-from" data-territory="${territoryId}">攻撃</button>` : ""}
+    ${canAttackTarget ? `<button type="button" data-action="attack" data-to="${territoryId}">攻撃</button>` : ""}
+    ${canExplore ? `<button type="button" data-action="explore" data-territory="${territoryId}">探索</button>` : ""}
   `;
 }
 
@@ -59,6 +64,10 @@ function formatTerritoryMenuInfo(
   localPlayerId: string,
   players: Record<string, { home_territory_id: string }>,
 ): string {
+  if (territory.owner_id && isAiOwnerId(territory.owner_id)) {
+    const name = aiFactionName(gameState, territory.owner_id) ?? territory.owner_id;
+    return `勢力領: ${name}`;
+  }
   if (
     territory.owner_id
     && isEnemyHomeTile(territoryId, territory, localPlayerId, { players })

@@ -5,6 +5,7 @@
 import { gameState } from "../store";
 import { getInventoryForState } from "../game/facility-selectors";
 import { getItem, getRarityColor } from "../game/items";
+import { renderScreenHeaderTitle } from "./screen-header";
 
 let inventoryEl: HTMLDivElement;
 let itemListEl: HTMLDivElement;
@@ -17,7 +18,7 @@ export function createInventoryElement(): HTMLDivElement {
 
   inventoryEl.innerHTML = `
     <div class="inventory-header">
-      <h2>インベントリ</h2>
+      <h2>${renderScreenHeaderTitle("inventory", "所持品")}</h2>
     </div>
     <div class="inventory-categories">
       <button type="button" class="inventory-category-btn is-active" data-category="all">全て</button>

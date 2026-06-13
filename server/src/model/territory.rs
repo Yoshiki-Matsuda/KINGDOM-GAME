@@ -6,28 +6,17 @@ pub(crate) fn get_territory_index(territories: &[Territory], id: &str) -> Option
 }
 
 pub(crate) fn is_home_territory(id: &str) -> bool {
-    parse_territory_id(id).map(|(c, r)| c == HOME_COL && r == HOME_ROW).unwrap_or(false)
+    parse_territory_id(id)
+        .map(|(c, r)| c == HOME_COL as i32 && r == HOME_ROW as i32)
+        .unwrap_or(false)
 }
 
 pub(crate) fn home_territory_id() -> String {
     format!("c_{}_{}", HOME_COL, HOME_ROW)
 }
 
-/// c_{col}_{row} 形式の ID から (col, row) を取得。
-pub(crate) fn parse_territory_id(id: &str) -> Option<(u8, u8)> {
-    let id = id.as_bytes();
-    if id.len() < 5 || &id[0..2] != b"c_" {
-        return None;
-    }
-    let rest = std::str::from_utf8(&id[2..]).ok()?;
-    let (col_str, row_str) = rest.split_once('_')?;
-    let col: u8 = col_str.parse().ok()?;
-    let row: u8 = row_str.parse().ok()?;
-    if col < GRID_COLS && row < GRID_ROWS {
-        Some((col, row))
-    } else {
-        None
-    }
+pub(crate) fn parse_territory_id(id: &str) -> Option<(i32, i32)> {
+    parse_territory_coords(id)
 }
 
 /// 攻撃時に「拠点を前線とみなす」オーナーID（自プレイヤー・援軍先・同盟メンバー）
@@ -78,9 +67,7 @@ pub(crate) fn is_attackable_target(
         Some(p) => p,
         None => return false,
     };
-    let col = col as i16;
-    let row = row as i16;
-    let owned_positions: std::collections::HashSet<(u8, u8)> = territories
+    let owned_positions: std::collections::HashSet<(i32, i32)> = territories
         .iter()
         .filter(|t| {
             t.owner_id
@@ -97,11 +84,7 @@ pub(crate) fn is_attackable_target(
         (col, row + 1),
     ];
     for (c, r) in neighbors {
-        if c < 0 || c >= GRID_COLS as i16 || r < 0 || r >= GRID_ROWS as i16 {
-            continue;
-        }
-        let (cu, ru) = (c as u8, r as u8);
-        if owned_positions.contains(&(cu, ru)) {
+        if owned_positions.contains(&(c, r)) {
             return true;
         }
     }

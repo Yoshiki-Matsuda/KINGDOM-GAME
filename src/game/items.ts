@@ -239,16 +239,7 @@ export function getItem(id: string): ItemDef | undefined {
   return ITEMS[id];
 }
 
-/** レアリティに応じた色を取得 */
-export function getRarityColor(rarity: ItemRarity): string {
-  switch (rarity) {
-    case "common": return "#9ca3af";
-    case "uncommon": return "#22c55e";
-    case "rare": return "#3b82f6";
-    case "epic": return "#a855f7";
-    case "legendary": return "#f59e0b";
-  }
-}
+export { getRarityColor } from "../shared/rarity-colors";
 
 import type { InventoryItem } from "../shared/game-state";
 

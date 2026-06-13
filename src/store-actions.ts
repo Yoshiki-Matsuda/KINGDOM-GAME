@@ -4,18 +4,18 @@ import {
   formedUnitsList,
   gameState,
   getLocalPlayerId,
-  setFormedUnitsList,
   setGameState,
   setTravelingUnits,
   travelingUnits,
 } from "./store";
+import { commitFormedUnits } from "./game/formed-units-persist";
 
 export function appendFormedUnit(unit: FormedUnit): void {
-  setFormedUnitsList([...formedUnitsList, unit]);
+  commitFormedUnits([...formedUnitsList, unit]);
 }
 
 export function removeFormedUnit(unitId: string): void {
-  setFormedUnitsList(formedUnitsList.filter((unit) => unit.id !== unitId));
+  commitFormedUnits(formedUnitsList.filter((unit) => unit.id !== unitId));
 }
 
 export function appendTravelingUnit(unit: TravelingUnit): void {

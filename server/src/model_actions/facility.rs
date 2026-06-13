@@ -91,7 +91,7 @@ pub(super) fn apply_build_base(
     let name = territory_name(&territories, territory_id).to_string();
     push_log(log, format!("{}に前線基地を建設しました！", name));
 
-    build_game_state(state, state.turn, territories, log.clone(), players)
+    build_game_state(state, territories, log.clone(), players)
 }
 
 /// KC準拠: 施設建設/レベルアップ（拠点ごとに同時1件のみ建設可能）
@@ -176,5 +176,5 @@ pub(super) fn apply_build_facility(
 
     player.facilities = facilities;
 
-    build_game_state(state, state.turn, state.territories.clone(), log.clone(), players)
+    build_game_state(state, state.territories.clone(), log.clone(), players)
 }

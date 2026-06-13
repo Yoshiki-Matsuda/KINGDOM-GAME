@@ -3,23 +3,48 @@
  * 各モジュールはここから import して参照・更新する。循環依存を防ぐ。
  */
 
-import { USE_MOCK_STATE } from "./config";
+import { USE_MOCK_STATE, wsUrlForMode } from "./config";
+import type { GameMode } from "./config";
+import { getStoredGameMode, persistGameMode } from "./network/game-mode-storage";
 import type { GameState, Territory, SkillDataPayload, CardStatsPayload } from "./shared/game-state";
-import { DEFAULT_GAME_STATE, DEFAULT_PLAYER_ID } from "./shared/game-state";
+import { DEFAULT_GAME_STATE, DEFAULT_PLAYER_ID, getWorldConfig } from "./shared/game-state";
 import { getMockGameState } from "./shared/mock-state";
-export { USE_MOCK_STATE, WS_URL } from "./config";
+
+export { USE_MOCK_STATE } from "./config";
+export function getWsUrl(): string {
+  return wsUrlForMode(gameMode);
+}
 
 // 旧バージョンの残骸。プレイヤーIDはサーバーが JWT から返す値のみを信頼する。
 localStorage.removeItem("kingdom.player_id");
 
 const storedAuthToken = localStorage.getItem("kingdom.auth_token");
 
+// --- ゲームモード ---
+export let gameMode: GameMode = getStoredGameMode();
+export function setGameMode(mode: GameMode) {
+  gameMode = mode;
+  persistGameMode(mode);
+}
+
+export function getGridCols(): number {
+  return getWorldConfig(gameState).cols;
+}
+
+export function getGridRows(): number {
+  return getWorldConfig(gameState).rows;
+}
+
 // --- ゲーム状態 ---
 export let gameState: GameState = USE_MOCK_STATE ? getMockGameState() : DEFAULT_GAME_STATE;
 export function setGameState(s: GameState) { gameState = s; }
 
 export let connectionStatus: "online" | "offline" = "offline";
-export function setConnectionStatus(s: "online" | "offline") { connectionStatus = s; }
+export function setConnectionStatus(s: "online" | "offline") {
+  if (connectionStatus === s) return;
+  connectionStatus = s;
+  render();
+}
 
 /** サーバー /api/whoami で確定したプレイヤーID（メモリのみ） */
 let authenticatedPlayerId: string | null = null;
@@ -43,6 +68,7 @@ export function getLocalPlayerId(): string {
 
 export let authToken: string | null = storedAuthToken;
 export function setAuthSession(token: string) {
+  if (authToken === token && authenticatedPlayerId != null) return;
   authToken = token;
   authenticatedPlayerId = null;
   localStorage.setItem("kingdom.auth_token", token);
@@ -51,10 +77,27 @@ export function clearAuthSession() {
   authToken = null;
   authenticatedPlayerId = null;
   localStorage.removeItem("kingdom.auth_token");
+  setConnectionStatus("offline");
 }
 
-export let attackSourceId: string | null = null;
-export function setAttackSourceId(id: string | null) { attackSourceId = id; }
+const PVP_SERVER_STORAGE_KEY = "kingdom.pvp_server_id";
+let selectedPvpServerId: string | null = localStorage.getItem(PVP_SERVER_STORAGE_KEY);
+
+export function getSelectedPvpServerId(): string | null {
+  return selectedPvpServerId;
+}
+
+export function setSelectedPvpServerId(serverId: string | null): void {
+  selectedPvpServerId = serverId;
+  if (serverId) localStorage.setItem(PVP_SERVER_STORAGE_KEY, serverId);
+  else localStorage.removeItem(PVP_SERVER_STORAGE_KEY);
+}
+
+export let modeSwitchError: string | null = null;
+export function setModeSwitchError(message: string | null) {
+  modeSwitchError = message;
+  render();
+}
 
 // --- WebSocket ---
 export let ws: WebSocket | null = null;
@@ -73,6 +116,7 @@ export function setFormedUnitsList(list: FormedUnit[]) { formedUnitsList = list;
 
 export let nextFormedUnitId = 1;
 export function getNextFormedUnitId(): number { return nextFormedUnitId++; }
+export function setNextFormedUnitId(n: number): void { nextFormedUnitId = Math.max(1, n); }
 
 export let formationSelected: number[] = [];
 export function setFormationSelected(sel: number[]) { formationSelected = sel; }
@@ -131,13 +175,18 @@ export function getHomeFacility(col: number, row: number): FacilityType {
 export type PendingUnitAction =
   | { type: "attack"; fromId: string; toId: string }
   | { type: "deploy"; territoryId: string }
+  | { type: "explore"; fromId: string; toId: string }
   | null;
 export let pendingUnitAction: PendingUnitAction = null;
 export function setPendingUnitAction(a: PendingUnitAction) { pendingUnitAction = a; }
 
 // --- レンダー コールバック ---
 let renderCallback: (() => void) | null = null;
+let renderMapSessionCallback: (() => void) | null = null;
 export function setRenderCallback(cb: () => void) { renderCallback = cb; }
+export function setRenderMapSessionCallback(cb: () => void) { renderMapSessionCallback = cb; }
 export function render() { renderCallback?.(); }
+/** WS tick 等: マップ表示中のみ HUD・地図・遠征オーバーレイを同期 */
+export function renderMapSession() { renderMapSessionCallback?.(); }
 
 export type { GameState, Territory, SkillDataPayload, CardStatsPayload };

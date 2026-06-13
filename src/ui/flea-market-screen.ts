@@ -8,6 +8,13 @@ import { getItem } from "../game/items";
 import { getInventoryForState } from "../game/facility-selectors";
 import type { MarketListing, MarketItemType, Action, BasicResourceType } from "../shared/game-state";
 import { getPlayerOwnedCards, getPlayerResources } from "../shared/game-state";
+import {
+  formatResourceAmount,
+  renderBasicResourceHtml,
+  renderGoldHtml,
+  RESOURCE_ICONS,
+} from "./resource-display";
+import { renderScreenHeaderTitle } from "./screen-header";
 
 let marketEl: HTMLDivElement;
 let listingContainer: HTMLDivElement;
@@ -20,7 +27,7 @@ export function createFleaMarketElement(): HTMLDivElement {
 
   marketEl.innerHTML = `
     <div class="market-header">
-      <h2>フリーマーケット</h2>
+      <h2>${renderScreenHeaderTitle("market", "取引所")}</h2>
       <div class="market-gold-display"></div>
     </div>
     <div class="market-tabs">
@@ -71,8 +78,7 @@ function describeItem(item: MarketItemType): string {
       return `${def?.icon ?? ""} ${def?.name ?? item.item_id} x${item.count}`;
     }
     case "resource": {
-      const names: Record<BasicResourceType, string> = { food: "食料", wood: "木材", stone: "石材", iron: "鉄" };
-      return `${names[item.resource_type]} x${item.amount}`;
+      return renderBasicResourceHtml(item.resource_type, item.amount);
     }
   }
 }
@@ -89,7 +95,7 @@ function renderBrowseTab(): void {
   listingContainer.innerHTML = listings.map(l => `
     <div class="market-listing-card">
       <div class="listing-item-info">${describeItem(l.item)}</div>
-      <div class="listing-price">${l.price.toLocaleString()} G</div>
+      <div class="listing-price">${renderGoldHtml(l.price)}</div>
       <button type="button" class="listing-buy-btn${gold < l.price ? " disabled" : ""}"
               data-listing-id="${l.listing_id}"
               ${gold < l.price ? "disabled" : ""}>
@@ -119,7 +125,7 @@ function renderMyListingsTab(): void {
   listingContainer.innerHTML = listings.map(l => `
     <div class="market-listing-card my-listing">
       <div class="listing-item-info">${describeItem(l.item)}</div>
-      <div class="listing-price">${l.price.toLocaleString()} G</div>
+      <div class="listing-price">${renderGoldHtml(l.price)}</div>
       <button type="button" class="listing-cancel-btn" data-listing-id="${l.listing_id}">取消</button>
     </div>
   `).join("");
@@ -158,10 +164,11 @@ function renderSellTab(): void {
       </div>
 
       <div class="sell-price-section">
-        <h3>価格（ゴールド）</h3>
-        <input type="number" class="sell-price-input" min="1" value="100" />
+        <h3><span class="resource-icon" aria-hidden="true">${RESOURCE_ICONS.gold}</span></h3>
+        <input type="number" class="sell-price-input" min="1" value="100" aria-label="価格" />
       </div>
 
+      <p class="sell-form-error" data-sell-error hidden></p>
       <button type="button" class="sell-confirm-btn">出品する</button>
     </div>
   `;
@@ -172,8 +179,19 @@ function renderSellTab(): void {
   const amountInput = listingContainer.querySelector(".sell-amount-input") as HTMLInputElement;
   const priceInput = listingContainer.querySelector(".sell-price-input") as HTMLInputElement;
   const confirmBtn = listingContainer.querySelector(".sell-confirm-btn") as HTMLButtonElement;
+  const sellErrorEl = listingContainer.querySelector<HTMLParagraphElement>("[data-sell-error]")!;
+
+  function setSellError(message: string | null): void {
+    if (message) {
+      sellErrorEl.textContent = message;
+      sellErrorEl.hidden = false;
+    } else {
+      sellErrorEl.hidden = true;
+    }
+  }
 
   function updateTargetOptions(): void {
+    setSellError(null);
     const type = typeSelect.value;
     targetSelect.innerHTML = "";
     amountRow.style.display = "none";
@@ -207,15 +225,15 @@ function renderSellTab(): void {
     } else if (type === "resource") {
       amountRow.style.display = "flex";
       const types = [
-        { id: "food", name: "食料", val: res?.food ?? 0 },
-        { id: "wood", name: "木材", val: res?.wood ?? 0 },
-        { id: "stone", name: "石材", val: res?.stone ?? 0 },
-        { id: "iron", name: "鉄", val: res?.iron ?? 0 },
+        { id: "food" as const, val: res?.food ?? 0 },
+        { id: "wood" as const, val: res?.wood ?? 0 },
+        { id: "stone" as const, val: res?.stone ?? 0 },
+        { id: "iron" as const, val: res?.iron ?? 0 },
       ];
       for (const r of types) {
         const opt = document.createElement("option");
         opt.value = r.id;
-        opt.textContent = `${r.name} (所持: ${r.val.toLocaleString()})`;
+        opt.textContent = `${RESOURCE_ICONS[r.id]} ${formatResourceAmount(r.val)}`;
         targetSelect.appendChild(opt);
       }
       amountInput.max = String(types[0]?.val ?? 0);
@@ -241,26 +259,42 @@ function renderSellTab(): void {
   });
 
   confirmBtn.addEventListener("click", () => {
+    setSellError(null);
     const type = typeSelect.value;
     const price = parseInt(priceInput.value, 10);
-    if (!price || price < 1) { alert("価格を1以上に設定してください"); return; }
+    if (!price || price < 1) {
+      setSellError("価格を1以上に設定してください");
+      return;
+    }
 
     let item: MarketItemType;
 
     if (type === "card") {
       const cardId = parseInt(targetSelect.value, 10);
-      if (isNaN(cardId)) { alert("魔獣を選択してください"); return; }
+      if (isNaN(cardId)) {
+        setSellError("魔獣を選択してください");
+        return;
+      }
       item = { type: "card", card_id: cardId };
     } else if (type === "item") {
       const itemId = targetSelect.value;
       const count = parseInt(amountInput.value, 10);
-      if (!itemId || !count || count < 1) { alert("アイテムと数量を指定してください"); return; }
+      if (!itemId || !count || count < 1) {
+        setSellError("アイテムと数量を指定してください");
+        return;
+      }
       item = { type: "item", item_id: itemId, count };
     } else {
       const resourceType = targetSelect.value;
       const amount = parseInt(amountInput.value, 10);
-      if (!resourceType || !amount || amount < 1) { alert("資源と数量を指定してください"); return; }
-      if (!isBasicResourceType(resourceType)) { alert("出品できない資源です"); return; }
+      if (!resourceType || !amount || amount < 1) {
+        setSellError("資源と数量を指定してください");
+        return;
+      }
+      if (!isBasicResourceType(resourceType)) {
+        setSellError("出品できない資源です");
+        return;
+      }
       item = { type: "resource", resource_type: resourceType, amount };
     }
 
@@ -275,7 +309,7 @@ function renderSellTab(): void {
 
 export function renderFleaMarket(): void {
   const goldDisplay = marketEl.querySelector(".market-gold-display") as HTMLDivElement;
-  goldDisplay.textContent = `所持金: ${getPlayerGold().toLocaleString()} G`;
+  goldDisplay.innerHTML = renderGoldHtml(getPlayerGold());
 
   switch (currentTab) {
     case "browse": renderBrowseTab(); break;

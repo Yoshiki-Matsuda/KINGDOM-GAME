@@ -8,10 +8,14 @@ use axum::{
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
-    app_state::AppState,
+    app_state::{AppState, GameStore},
     auth,
-    model::{apply_action, check_season_end, cleanup_expired_ruins, tick_resources, Action},
-    persistence::save_state,
+    model::{
+        apply_action, check_season_end, client_view_json, tick_world,
+        Action, GameState,
+    },
+    persistence::{save_player_world, save_state},
+    server_mode::ServerMode,
 };
 
 #[derive(serde::Deserialize)]
@@ -30,20 +34,58 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         return;
     };
 
-    let json = {
-        let _guard = state.mutation_lock.lock().await;
-        let mut game = state.game.write().await;
-        cleanup_expired_ruins(&mut game);
-        tick_resources(&mut game);
-        check_season_end(&mut game);
-        let _ = save_state(&state.state_path, &game).await;
-        serde_json::to_string(&*game).unwrap_or_else(|_| r#"{"error":"serialize"}"#.to_string())
-    };
-    if socket.send(Message::Text(json)).await.is_err() {
-        return;
-    }
+    let server_mode = state.server_mode;
+    let is_pvp = server_mode == ServerMode::Pvp;
 
-    let mut broadcast_rx = state.broadcast_tx.subscribe();
+    let (world_arc, mut broadcast_rx) = match &state.store {
+        GameStore::Shared(game) => {
+            let json = {
+                let _guard = state.mutation_lock.lock().await;
+                let mut game = game.write().await;
+                tick_world(&mut game, state.dev_auto_win, server_mode);
+                if is_pvp {
+                    check_season_end(&mut game);
+                }
+                state.wake_march_scheduler_if_active(&game);
+                let _ = save_state(&state.state_path, &game).await;
+                if is_pvp {
+                    client_view_json(&game, &actor_player_id, server_mode)
+                } else {
+                    serde_json::to_string(&*game)
+                        .unwrap_or_else(|_| r#"{"error":"serialize"}"#.to_string())
+                }
+            };
+            if socket.send(Message::Text(json)).await.is_err() {
+                return;
+            }
+            (game.clone(), state.broadcast_tx.subscribe())
+        }
+        GameStore::PerPlayer(mgr) => {
+            let mgr = mgr.clone();
+            let world = mgr.get_or_create_world(&actor_player_id).await;
+            mgr.touch(&actor_player_id).await;
+            let json = {
+                let _guard = state.mutation_lock.lock().await;
+                let mut game = world.write().await;
+                tick_world(&mut game, state.dev_auto_win, server_mode);
+                state.wake_march_scheduler_if_active(&game);
+                let _ = save_player_world(mgr.base_path(), &actor_player_id, &game).await;
+                serde_json::to_string(&*game)
+                    .unwrap_or_else(|_| r#"{"error":"serialize"}"#.to_string())
+            };
+            if socket.send(Message::Text(json)).await.is_err() {
+                return;
+            };
+            let rx = mgr
+                .subscribe(&actor_player_id)
+                .await
+                .unwrap_or_else(|| {
+                    let (_, rx) = tokio::sync::broadcast::channel(1);
+                    rx
+                });
+            (world, rx)
+        }
+    };
 
     loop {
         tokio::select! {
@@ -57,23 +99,34 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                     None => break,
                 };
                 let Ok(text) = msg.to_text() else { continue };
-                // 空フレームは無視（クライアント・プロキシが送ることがあり、EOF パースエラーでログが埋まる）
                 let text = text.trim();
                 if text.is_empty() {
                     continue;
                 }
                 let Ok(action) = serde_json::from_str::<Action>(text) else { continue };
 
-                // 同一ワールド内の状態更新は mutation_lock で直列化し、snapshot 後勝ちによる lost update を防ぐ。
+                if let GameStore::PerPlayer(mgr) = &state.store {
+                    mgr.touch(&actor_player_id).await;
+                }
+
                 let _guard = state.mutation_lock.lock().await;
-                let game_snapshot = { state.game.read().await.clone() };
+                let game_snapshot = { world_arc.read().await.clone() };
                 let dev_auto_win = state.dev_auto_win;
                 let actor_for_apply = actor_player_id.clone();
                 let action_for_log = action.clone();
+                let server_mode = state.server_mode;
                 let new_state = match tokio::task::spawn_blocking(move || {
-                    let mut updated = apply_action(&game_snapshot, &actor_for_apply, &action, dev_auto_win);
-                    tick_resources(&mut updated);
-                    check_season_end(&mut updated);
+                    let mut updated = apply_action(
+                        &game_snapshot,
+                        &actor_for_apply,
+                        &action,
+                        dev_auto_win,
+                        server_mode,
+                    );
+                    tick_world(&mut updated, dev_auto_win, server_mode);
+                    if server_mode == ServerMode::Pvp {
+                        check_season_end(&mut updated);
+                    }
                     updated
                 })
                 .await
@@ -100,33 +153,62 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 }
 
                 {
-                    let mut game = state.game.write().await;
+                    let mut game = world_arc.write().await;
                     *game = new_state.clone();
                 }
-                let _ = save_state(&state.state_path, &new_state).await;
-                let json = serde_json::to_string(&new_state).unwrap_or_else(|e| {
-                    eprintln!("[kingdom-server] GameState serialize error: {}", e);
-                    r#"{"error":"serialize"}"#.to_string()
-                });
-                let _ = state.broadcast_tx.send(json.clone());
+
+                persist_and_broadcast(&state, &actor_player_id, &new_state).await;
+
+                let json = if is_pvp {
+                    client_view_json(&new_state, &actor_player_id, server_mode)
+                } else {
+                    serde_json::to_string(&new_state).unwrap_or_else(|e| {
+                        eprintln!("[kingdom-server] GameState serialize error: {}", e);
+                        r#"{"error":"serialize"}"#.to_string()
+                    })
+                };
                 let _ = socket.send(Message::Text(json)).await;
             }
             br = broadcast_rx.recv() => {
                 match br {
-                    Ok(json) => {
+                    Ok(full_json) => {
+                        let json = if is_pvp {
+                            filter_broadcast_json(&full_json, &actor_player_id, server_mode)
+                        } else {
+                            full_json
+                        };
                         if socket.send(Message::Text(json)).await.is_err() {
                             break;
                         }
                     }
-                    Err(RecvError::Lagged(_)) => {
-                        // 攻撃処理などで受信が遅れただけ。切断せず最新へ追いつく。
-                        continue;
-                    }
+                    Err(RecvError::Lagged(_)) => continue,
                     Err(RecvError::Closed) => break,
                 }
             }
         }
     }
+}
+
+fn filter_broadcast_json(full_json: &str, viewer_id: &str, mode: ServerMode) -> String {
+    match serde_json::from_str::<GameState>(full_json) {
+        Ok(state) => client_view_json(&state, viewer_id, mode),
+        Err(_) => full_json.to_string(),
+    }
+}
+
+async fn persist_and_broadcast(state: &AppState, player_id: &str, new_state: &GameState) {
+    let json = serde_json::to_string(new_state).unwrap_or_default();
+    match &state.store {
+        GameStore::Shared(_) => {
+            let _ = save_state(&state.state_path, new_state).await;
+            state.broadcast_json(None, json);
+        }
+        GameStore::PerPlayer(mgr) => {
+            mgr.save_world(player_id, new_state).await;
+            mgr.broadcast(player_id, json.clone()).await;
+        }
+    }
+    state.wake_march_scheduler_if_active(new_state);
 }
 
 async fn authenticate_socket(socket: &mut WebSocket, state: &AppState) -> Option<String> {
@@ -135,17 +217,23 @@ async fn authenticate_socket(socket: &mut WebSocket, state: &AppState) -> Option
         _ => return None,
     };
     let Ok(text) = msg.to_text() else {
-        let _ = socket.send(Message::Text(r#"{"error":"auth_required"}"#.to_string())).await;
+        let _ = socket
+            .send(Message::Text(r#"{"error":"auth_required"}"#.to_string()))
+            .await;
         return None;
     };
     let Ok(ClientEnvelope::Auth { token }) = serde_json::from_str::<ClientEnvelope>(text.trim()) else {
-        let _ = socket.send(Message::Text(r#"{"error":"auth_required"}"#.to_string())).await;
+        let _ = socket
+            .send(Message::Text(r#"{"error":"auth_required"}"#.to_string()))
+            .await;
         return None;
     };
-    match auth::verify_token(&state.jwt_secret, &token) {
+    match auth::verify_token_for_mode(&state.jwt_secret, &token, state.server_mode) {
         Ok(claims) => Some(claims.sub),
         Err(_) => {
-            let _ = socket.send(Message::Text(r#"{"error":"auth_invalid"}"#.to_string())).await;
+            let _ = socket
+                .send(Message::Text(r#"{"error":"auth_invalid"}"#.to_string()))
+                .await;
             None
         }
     }

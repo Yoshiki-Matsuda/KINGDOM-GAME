@@ -1,4 +1,5 @@
 import { getCharacterSkills, type CharacterSkills, type SkillData, getCharacterSkillData } from "./skills";
+import { getRarityClass } from "../shared/rarity-colors";
 
 /** 3体で1ユニットが編成される */
 export const BODIES_PER_UNIT = 3;
@@ -6,17 +7,17 @@ export const BODIES_PER_UNIT = 3;
 /** キャラ1体あたりの仮の魔獣数（必ず勝てる数値） */
 export const DEFAULT_BODY_MONSTER_COUNT = 10;
 
-/** キャラ1体あたりのデフォルトSPEED（1〜10、高いほど速い） */
+/** キャラ1体あたりのデフォルト速さ（未設定時のフォールバック） */
 export const DEFAULT_BODY_SPEED = 5;
 
-/** 移動時間の基本係数（秒/マス）。SPEEDで割る */
+/** 移動時間の基本係数（秒/マス）。速さで割る */
 export const BASE_TRAVEL_TIME_PER_TILE = 2.0;
 
 /** 魔獣の基本ステータス定義 */
 export interface CardStats {
   /** 魔獣数（HP/ベース係数） */
   monster_count: number;
-  /** スピード（行動順序） */
+  /** 速さ（行動順・移動時間） */
   speed: number;
   /** 攻撃力（物理ダメージ） */
   attack: number;
@@ -276,14 +277,65 @@ export function getBodyDisplayName(index: number): string {
   return CHARACTER_NAMES[index] ?? `キャラ${index + 1}`;
 }
 
+/** `public/cards/character-{id}.png` が存在する魔獣ID */
+export const ILLUSTRATED_CARD_IDS: readonly number[] = [
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+  50, 51, 52, 53, 54, 55, 56,
+  60, 61, 62, 63, 64, 65, 66,
+  70, 71, 72, 73, 74,
+  80, 81, 82, 83,
+  90, 91, 92, 93,
+  100, 101, 102, 103, 104,
+  110, 111, 112, 113, 114,
+];
+
+const ILLUSTRATED_CARD_ID_SET = new Set(ILLUSTRATED_CARD_IDS);
+
+/** 魔獣にイラスト画像が紐づいているか */
+export function hasCharacterIllustration(index: number): boolean {
+  return ILLUSTRATED_CARD_ID_SET.has(index);
+}
+
 /** 魔獣イラストのパス（キャラクターインデックス→画像URL） */
 export function getCharacterIllustrationPath(index: number): string {
+  if (!hasCharacterIllustration(index)) {
+    return "/cards/placeholder.svg";
+  }
   return `/cards/character-${index}.png`;
 }
 
 /** 魔獣のレアリティを取得 */
 export function getCardRarity(index: number): CardRarity {
   return CHARACTER_RARITY[index] ?? "common";
+}
+
+export { getRarityColor, getRarityClass } from "../shared/rarity-colors";
+export function getCardRarityClass(cardId: number): string {
+  return getRarityClass(getCardRarity(cardId));
+}
+
+/** 同一 card_id の所持スロット数 */
+export function countOwnedSlotsByCardId(owned: number[], cardId: number): number {
+  return owned.filter((id) => id === cardId).length;
+}
+
+/** card_id の代表スロット（最初の出現インデックス） */
+export function getCanonicalSlotForCardId(owned: number[], cardId: number): number | undefined {
+  const idx = owned.indexOf(cardId);
+  return idx >= 0 ? idx : undefined;
+}
+
+/** 魔獣一覧用: イラストあり種族ごとに代表スロットを返す */
+export function getUniqueIllustratedSpeciesSlots(owned: number[]): number[] {
+  const seen = new Set<number>();
+  const slots: number[] = [];
+  for (let i = 0; i < owned.length; i++) {
+    const cardId = owned[i];
+    if (!hasCharacterIllustration(cardId) || seen.has(cardId)) continue;
+    seen.add(cardId);
+    slots.push(i);
+  }
+  return slots;
 }
 
 /** 魔獣の種族を取得 */

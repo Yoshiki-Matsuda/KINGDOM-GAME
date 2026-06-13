@@ -126,6 +126,63 @@ pub fn calculate_facility_bonuses(facilities: &[BuiltFacility]) -> FacilityBonus
     bonuses
 }
 
+/// 10分あたりの施設資源生産量
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FacilityResourceRates {
+    pub food_per_tick: u64,
+    pub wood_per_tick: u64,
+    pub stone_per_tick: u64,
+    pub iron_per_tick: u64,
+}
+
+fn resource_production_per_10min(facility_id: &str, level: u8) -> Option<(u64, &'static str)> {
+    let idx = level.saturating_sub(1) as usize;
+    let value = match facility_id {
+        "field" => [5u64, 12, 25, 45, 80].get(idx).copied(),
+        "lumber_mill" => [5, 12, 25, 45, 80].get(idx).copied(),
+        "quarry" => [3, 8, 18, 35, 60].get(idx).copied(),
+        "iron_mine" => [3, 8, 18, 35, 60].get(idx).copied(),
+        _ => None,
+    }?;
+    let resource = match facility_id {
+        "field" => "food",
+        "lumber_mill" => "wood",
+        "quarry" => "stone",
+        "iron_mine" => "iron",
+        _ => return None,
+    };
+    Some((value, resource))
+}
+
+/// 建設済み施設から10分あたりの資源生産を集計
+pub fn calculate_facility_resource_rates(facilities: &[BuiltFacility]) -> FacilityResourceRates {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let mut rates = FacilityResourceRates::default();
+
+    for facility in facilities {
+        if let Some(complete_at) = facility.build_complete_at {
+            if complete_at > now {
+                continue;
+            }
+        }
+        let Some((value, resource)) = resource_production_per_10min(&facility.facility_id, facility.level)
+        else {
+            continue;
+        };
+        match resource {
+            "food" => rates.food_per_tick = rates.food_per_tick.saturating_add(value),
+            "wood" => rates.wood_per_tick = rates.wood_per_tick.saturating_add(value),
+            "stone" => rates.stone_per_tick = rates.stone_per_tick.saturating_add(value),
+            "iron" => rates.iron_per_tick = rates.iron_per_tick.saturating_add(value),
+            _ => {}
+        }
+    }
+    rates
+}
+
 /// 施設ボーナスを適用した魔獣数（monster count）を計算
 pub fn apply_monster_bonus(base_monster_count: u32, bonuses: &FacilityBonuses) -> u32 {
     let with_bonus = base_monster_count + bonuses.monster_bonus;

@@ -3,9 +3,74 @@ use super::*;
 /// デフォルトの操作プレイヤーID
 pub const DEFAULT_PLAYER_ID: &str = "player";
 
-/// 本拠地のデフォルト座標
-pub const HOME_COL: u8 = 24;
-pub const HOME_ROW: u8 = 24;
+/// 本拠地のデフォルト座標（48×48 開発用）
+pub const HOME_COL: u8 = crate::config::DEFAULT_HOME_COL;
+pub const HOME_ROW: u8 = crate::config::DEFAULT_HOME_ROW;
+
+/// マップサイズ設定（可変グリッド）
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorldConfig {
+    pub cols: u16,
+    pub rows: u16,
+    pub home_col: u16,
+    pub home_row: u16,
+    /// 地形生成シード。同一シード+同一グリッドサイズで地形が再現される。0 は未記録。
+    #[serde(default)]
+    pub terrain_seed: u64,
+}
+
+impl Default for WorldConfig {
+    fn default() -> Self {
+        Self {
+            cols: crate::config::DEFAULT_WORLD_COLS,
+            rows: crate::config::DEFAULT_WORLD_ROWS,
+            home_col: HOME_COL as u16,
+            home_row: HOME_ROW as u16,
+            terrain_seed: 0,
+        }
+    }
+}
+
+impl WorldConfig {
+    pub fn from_env() -> Self {
+        let cols = crate::config::env_u16(
+            crate::config::ENV_WORLD_COLS,
+            crate::config::DEFAULT_WORLD_COLS,
+        );
+        let rows = crate::config::env_u16(
+            crate::config::ENV_WORLD_ROWS,
+            crate::config::DEFAULT_WORLD_ROWS,
+        );
+        let home_col = crate::config::env_u16(crate::config::ENV_WORLD_HOME_COL, cols / 2);
+        let home_row = crate::config::env_u16(crate::config::ENV_WORLD_HOME_ROW, rows / 2);
+        Self {
+            cols,
+            rows,
+            home_col,
+            home_row,
+            terrain_seed: 0,
+        }
+    }
+}
+
+/// PVE専用: AI勢力の性格
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiPersonality {
+    Aggressive,
+    Balanced,
+    Defensive,
+}
+
+/// PVE専用: AI勢力の定義
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiFaction {
+    pub faction_id: String,
+    pub name: String,
+    pub personality: AiPersonality,
+    pub home_territory_id: String,
+    pub color: u32,
+}
 
 /// 新規参加プレイヤーの本拠は、既存プレイヤー本拠からこのマンハッタン距離以上離す。
 pub(crate) const MIN_HOME_SEPARATION: u8 = 8;
@@ -55,6 +120,14 @@ pub struct MarketListing {
     pub listed_at: u64,
 }
 
+/// 保存用ユニット編成（クライアントと同一 JSON）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoredFormedUnit {
+    pub id: String,
+    pub name: String,
+    pub indices: [i32; 3],
+}
+
 /// プレイヤー固有のデータ
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerData {
@@ -82,6 +155,9 @@ pub struct PlayerData {
     /// 最後に資源を回収した時刻（Unix timestamp ms）
     #[serde(default = "default_now_ms")]
     pub last_resource_tick: u64,
+    /// 最後にスタミナを回復した時刻（Unix timestamp ms）
+    #[serde(default = "default_now_ms")]
+    pub last_stamina_tick: u64,
     /// 所持魔獣スロットごとのレベル（owned_cards と同じ長さ）
     #[serde(default)]
     pub card_levels: Vec<u32>,
@@ -91,9 +167,12 @@ pub struct PlayerData {
     /// 所持魔獣スロットごとのスタミナ（KC: 出撃・探索に使用）
     #[serde(default)]
     pub card_stamina: Vec<u32>,
-    /// 所持魔獣スロットごとのステータスポイント（KC: Lvアップ・EXCELLENT探索で取得、振り分けでステータス強化）
+    /// 所持魔獣スロットごとの未配分ステータスポイント（Lvアップで+10）
     #[serde(default)]
     pub card_status_points: Vec<u32>,
+    /// 所持魔獣スロットごとの配分済みステータスボーナス
+    #[serde(default)]
+    pub card_stat_bonuses: Vec<crate::model::CardStatBonuses>,
     /// 所持魔獣スロットごとの「休息中」解除時刻（ms）。今より未来ならFAILURE後のダウン中
     #[serde(default)]
     pub card_rest_until: Vec<u64>,
@@ -122,7 +201,19 @@ pub struct PlayerData {
     #[serde(default)]
     pub charge_points: u64,
     #[serde(default)]
-    pub explorations: Vec<ExplorationMission>,
+    pub marches: Vec<MarchMission>,
+    /// ユニット編成（永続化）
+    #[serde(default)]
+    pub formed_units: Vec<StoredFormedUnit>,
+    /// PVE AI専用: 攻撃失敗した領地のクールダウン（領地ID, 解除時刻ms）
+    #[serde(default)]
+    pub ai_attack_cooldowns: Vec<(String, u64)>,
+    /// PVE AI専用: この時刻まで攻撃より生産・建設を優先
+    #[serde(default)]
+    pub ai_recover_until: u64,
+    /// PVE AI専用: 直前に攻撃した領地（同標的の連続攻撃を避ける）
+    #[serde(default)]
+    pub ai_last_attack_target: Option<String>,
 }
 fn default_unit_cost_cap() -> f32 {
     4.0
@@ -147,10 +238,12 @@ impl PlayerData {
             allied_player_ids: vec![],
             resources: Resources::default(),
             last_resource_tick: default_now_ms(),
+            last_stamina_tick: default_now_ms(),
             card_levels: vec![],
             card_exp: vec![],
             card_stamina: vec![],
             card_status_points: vec![],
+            card_stat_bonuses: vec![],
             card_rest_until: vec![],
             card_awakened: vec![],
             card_enhanced: vec![],
@@ -160,7 +253,11 @@ impl PlayerData {
             unit_cost_cap: default_unit_cost_cap(),
             dungeon_points: 0,
             charge_points: 0,
-            explorations: vec![],
+            marches: vec![],
+            formed_units: vec![],
+            ai_attack_cooldowns: vec![],
+            ai_recover_until: 0,
+            ai_last_attack_target: None,
         }
     }
 }
@@ -188,15 +285,57 @@ fn default_alliance_level() -> u32 {
     1
 }
 
-/// 探索派遣（KC準拠・ホーム外領地への時間経過ミッション）
+/// 遠征の種別（攻撃・援軍・探索・帰還）
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MarchKind {
+    Attack,
+    Deploy,
+    Explore,
+    Return,
+}
+
+/// マップ上に表示する進行中の遠征（全プレイヤー・AI 含む）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExplorationMission {
-    pub mission_id: String,
-    pub territory_id: String,
+pub struct VisibleMarch {
+    pub march_id: String,
+    pub owner_id: String,
+    pub kind: MarchKind,
+    pub home_territory_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_territory_id: Option<String>,
+    pub to_territory_id: String,
+    pub arrives_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_name: Option<String>,
+}
+
+/// 進行中の遠征（攻撃・援軍・探索・帰還表示）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarchMission {
+    pub march_id: String,
+    pub kind: MarchKind,
+    pub from_territory_id: String,
+    pub to_territory_id: String,
     pub started_at: u64,
-    pub completes_at: u64,
-    #[serde(default)]
-    pub card_indices: Vec<usize>,
+    pub arrives_at: u64,
+    pub count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monsters_per_body: Option<Vec<u32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_names: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed_per_body: Option<Vec<u32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills_per_body: Option<Vec<SkillData>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stats_per_body: Option<Vec<CardStats>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned_card_indices: Option<Vec<usize>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formed_unit_id: Option<String>,
 }
 
 /// 施設の配置座標（ホームマップ上）
@@ -276,8 +415,13 @@ pub(crate) fn parse_territory_coords(id: &str) -> Option<(i32, i32)> {
 /// ゲーム全体の状態。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
-    pub turn: u32,
-    pub phase: String,
+    #[serde(default)]
+    pub world: WorldConfig,
+    /// PVEワールドの所有者（人間プレイヤーID）。PVPでは None
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_owner_id: Option<String>,
+    #[serde(default)]
+    pub ai_factions: Vec<AiFaction>,
     pub territories: Vec<Territory>,
     /// バックエンドで発生した行動のログ。ユーザーはこれを読むだけ。
     #[serde(default)]
@@ -293,6 +437,9 @@ pub struct GameState {
     /// フリーマーケット出品一覧
     #[serde(default)]
     pub market_listings: Vec<MarketListing>,
+    /// マップ表示用の進行中遠征（全プレイヤー・AI）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visible_marches: Vec<VisibleMarch>,
 }
 
 /// KC準拠のシーズン情報（一定期間でマップ・領地リセット）

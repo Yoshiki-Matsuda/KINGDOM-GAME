@@ -12,18 +12,25 @@ use crate::ruins::RuinInfo;
 use crate::cards::get_card;
 
 mod action;
+mod card_stats;
 mod player;
 mod progression;
 mod state;
 mod territory;
+mod travel;
 mod types;
 mod world;
 
 pub use action::*;
+pub use card_stats::*;
 pub use player::*;
 pub use progression::*;
 pub use state::*;
 pub(crate) use territory::*;
 pub use types::*;
+pub use travel::{average_speed, travel_time_ms};
 pub use world::migrate_legacy_neutral_enemies;
+pub use world::generate_territories;
+pub use world::resolve_terrain_seed;
+pub use world::migrate_legacy_terrain;
 pub(crate) use world::*;

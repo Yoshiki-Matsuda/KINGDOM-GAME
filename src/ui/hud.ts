@@ -7,6 +7,10 @@ import {
 } from "../store";
 import { getFacilityBonusesForState } from "../game/facility-selectors";
 import { getPlayerResources } from "../shared/game-state";
+import { renderResourcesHtml } from "./resource-display";
+import { syncResourceChangeFlashes } from "./resource-flash";
+
+export { renderResourcesHtml } from "./resource-display";
 
 let hudEl: HTMLDivElement;
 
@@ -28,19 +32,23 @@ export function renderHud(): void {
   const bonusTexts: string[] = [];
   if (bonuses.monsterBonus > 0) bonusTexts.push(`M+${bonuses.monsterBonus}`);
   if (bonuses.monsterPercent > 0) bonusTexts.push(`M+${bonuses.monsterPercent}%`);
-  if (bonuses.speedBonus > 0) bonusTexts.push(`SPD+${bonuses.speedBonus}`);
+  if (bonuses.speedBonus > 0) bonusTexts.push(`速さ+${bonuses.speedBonus}`);
   if (bonuses.dropRate > 0) bonusTexts.push(`DROP+${bonuses.dropRate}%`);
 
   const bonusDisplay = bonusTexts.length > 0
     ? `<span class="hud-bonus">${bonusTexts.join(" ")}</span>`
     : "";
 
-  const res = getPlayerResources(gameState, getLocalPlayerId());
-  const resDisplay = `<span class="hud-resources">🌾${res.food} 🪵${res.wood} 🪨${res.stone} ⛏${res.iron}</span>`;
+  const resDisplay = renderResourcesHtml();
 
   hudEl.innerHTML = `
     <span class="hud-status" data-status="${USE_MOCK_STATE ? "mock" : connectionStatus}">${statusText}</span>
     ${resDisplay}
     ${bonusDisplay}
   `;
+
+  const resBar = hudEl.querySelector(".hud-resources");
+  if (resBar) {
+    syncResourceChangeFlashes(resBar, getPlayerResources(gameState, getLocalPlayerId()));
+  }
 }

@@ -7,13 +7,14 @@ import "./style.css";
 import { bootstrapApp, bindGlobalMenuDismiss } from "./app-bootstrap";
 import { createAppElements } from "./app-dom";
 import { createAppRenderer } from "./app-render";
-import { setRenderCallback } from "./store";
+import { setRenderCallback, setRenderMapSessionCallback } from "./store";
 import { closeMenu, showMenuAt } from "./ui/context-menu";
 import { closeUnitSelect } from "./ui/unit-select";
+import { initHudSettings } from "./ui/hud-settings";
 
 const appEl = document.querySelector<HTMLDivElement>("#app")!;
 const elements = createAppElements(appEl);
-const render = createAppRenderer({
+const { render, renderMapSession } = createAppRenderer({
   homeEl: elements.homeEl,
   mapContainer: elements.mapContainer,
   logEl: elements.logEl,
@@ -26,6 +27,8 @@ const render = createAppRenderer({
 });
 
 setRenderCallback(render);
+setRenderMapSessionCallback(renderMapSession);
+initHudSettings({ closeMenu, closeUnitSelect });
 bindGlobalMenuDismiss(elements.menuEl, closeMenu);
 
 (async () => {

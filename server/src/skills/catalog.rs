@@ -22,7 +22,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "wind_blessing" => Some(Skill {
             id: "wind_blessing".to_string(),
             name: "疾風の祝福".to_string(),
-            description: "戦闘開始時、味方全員のSPEED+2".to_string(),
+            description: "戦闘開始時、味方全員の速さ+2".to_string(),
             category: SkillCategory::Passive,
             timing: SkillTiming::BattleStart,
             effects: vec![SkillEffect {
@@ -100,7 +100,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "barrier_field" => Some(Skill {
             id: "barrier_field".to_string(),
             name: "結界展開".to_string(),
-            description: "戦闘開始時、味方全員にシールド50付与（スキルLvで強化）".to_string(),
+            description: "戦闘開始時、味方全員にシールド50付与".to_string(),
             category: SkillCategory::Passive,
             timing: SkillTiming::BattleStart,
             effects: vec![SkillEffect {
@@ -170,7 +170,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "poison_aura" => Some(Skill {
             id: "poison_aura".to_string(),
             name: "瘴気の纏い".to_string(),
-            description: "戦闘開始時、敵全員に毒（毎ターン20ダメージ、スキルLvで強化）".to_string(),
+            description: "戦闘開始時、敵全員に毒（毎ターン20ダメージ）".to_string(),
             category: SkillCategory::Passive,
             timing: SkillTiming::BattleStart,
             effects: vec![SkillEffect {
@@ -271,7 +271,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "power_smash" => Some(Skill {
             id: "power_smash".to_string(),
             name: "剛撃".to_string(),
-            description: "攻撃時、+80ダメージ（スキルLvで強化）".to_string(),
+            description: "攻撃時、+80ダメージ".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -313,7 +313,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "sharp_thrust" => Some(Skill {
             id: "sharp_thrust".to_string(),
             name: "鋭突".to_string(),
-            description: "攻撃時、+50ダメージ（スキルLvで強化）".to_string(),
+            description: "攻撃時、+50ダメージ".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -327,7 +327,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "swift_blade" => Some(Skill {
             id: "swift_blade".to_string(),
             name: "迅刃".to_string(),
-            description: "攻撃時、SPEED×0.5を追加ダメージ".to_string(),
+            description: "攻撃時、知力×0.5を追加ダメージ".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -370,7 +370,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "whirlwind" => Some(Skill {
             id: "whirlwind".to_string(),
             name: "旋風撃".to_string(),
-            description: "攻撃時、敵全体に40ダメージ+現在HP3%（スキルLvで強化）".to_string(),
+            description: "攻撃時、敵全体に40ダメージ+現在HP3%".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![
@@ -407,7 +407,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "monster_steal" => Some(Skill {
             id: "monster_steal".to_string(),
             name: "奪命の一撃".to_string(),
-            description: "攻撃時、敵から30魔獣数を奪う（スキルLvで強化）".to_string(),
+            description: "攻撃時、敵から30魔獣数を奪う".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -421,7 +421,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "heal_strike" => Some(Skill {
             id: "heal_strike".to_string(),
             name: "癒しの剣".to_string(),
-            description: "攻撃時、HP最低の味方を30回復（スキルLvで強化）".to_string(),
+            description: "攻撃時、HP最低の味方を30回復".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -450,7 +450,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "percent_cut" => Some(Skill {
             id: "percent_cut".to_string(),
             name: "割合斬り".to_string(),
-            description: "攻撃時、敵の現在HPの20%ダメージ（スキルLvで強化）".to_string(),
+            description: "攻撃時、敵の現在HPの20%ダメージ".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -479,7 +479,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "blaze_edge" => Some(Skill {
             id: "blaze_edge".to_string(),
             name: "炎刃".to_string(),
-            description: "攻撃時、敵に炎上付与（3ターン、毎ターン30ダメージ、スキルLvで強化）".to_string(),
+            description: "攻撃時、敵に炎上付与（3ターン、毎ターン30ダメージ）".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -493,7 +493,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "venom_fang" => Some(Skill {
             id: "venom_fang".to_string(),
             name: "毒牙".to_string(),
-            description: "攻撃時、敵に毒付与（3ターン、毎ターン20ダメージ、スキルLvで強化）".to_string(),
+            description: "攻撃時、敵に毒付与（3ターン、毎ターン20ダメージ）".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -578,7 +578,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "shield_bash" => Some(Skill {
             id: "shield_bash".to_string(),
             name: "盾撃".to_string(),
-            description: "攻撃時、自分にシールド30付与（スキルLvで強化）".to_string(),
+            description: "攻撃時、自分にシールド30付与".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -622,7 +622,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "mark_target" => Some(Skill {
             id: "mark_target".to_string(),
             name: "狙撃".to_string(),
-            description: "攻撃時、敵にマーク付与（被ダメージ+50、3ターン、スキルLvで強化）".to_string(),
+            description: "攻撃時、敵にマーク付与（被ダメージ+50、3ターン）".to_string(),
             category: SkillCategory::Active,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -667,7 +667,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "thunder_call" => Some(Skill {
             id: "thunder_call".to_string(),
             name: "雷神招来".to_string(),
-            description: "攻撃時、50%で敵全体に+100ダメージ（スキルLvで強化）".to_string(),
+            description: "攻撃時、50%で敵全体に+100ダメージ".to_string(),
             category: SkillCategory::Unique,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {
@@ -783,7 +783,7 @@ pub fn get_skill(id: &str) -> Option<Skill> {
         "plague_touch" => Some(Skill {
             id: "plague_touch".to_string(),
             name: "疫病の手".to_string(),
-            description: "攻撃時、敵全員に毒付与（毎ターン50ダメージ、3ターン、スキルLvで強化）".to_string(),
+            description: "攻撃時、敵全員に毒付与（毎ターン50ダメージ、3ターン）".to_string(),
             category: SkillCategory::Unique,
             timing: SkillTiming::OnAttack,
             effects: vec![SkillEffect {

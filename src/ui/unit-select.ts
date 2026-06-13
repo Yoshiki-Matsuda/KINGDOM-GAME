@@ -7,27 +7,22 @@ import {
   ws,
   formedUnitsList,
   bodyMonsterCounts,
-  bodySpeeds,
   pendingUnitAction, setPendingUnitAction,
-  setAttackSourceId,
   render,
-  getNextTravelingId,
   getLocalPlayerId,
 } from "../store";
-import type { TravelingUnit } from "../store";
-import { DEFAULT_BODY_MONSTER_COUNT, DEFAULT_BODY_SPEED, getBodyDisplayName, getCharacterSkillData, getCharacterStats } from "../game/characters";
+import { DEFAULT_BODY_MONSTER_COUNT, getBodyDisplayName, getCharacterSkillData } from "../game/characters";
+import { cardStatsToPayload, getEffectiveCardStats } from "../game/effective-stats";
 import {
   formationBodyIndicesInSlotOrder,
   isKcUnitReadyToDeploy,
-  recalcUnitStats,
 } from "../game/formation";
 import { gameState } from "../store";
-import { getPlayerOwnedCards } from "../shared/game-state";
+import { getPlayerOwnedCards, startMarchAction, getPlayerMarches, explorationMaxSlots, activeExploreBodiesInFlight } from "../shared/game-state";
+import type { MarchKind } from "../shared/game-state";
 import { getPlayerHomeTerritoryId } from "../game/territories";
-import { getDistanceFromHome, getTravelTimeMs, startTravelIntervalIfNeeded } from "../game/travel";
 import { closeMenu } from "./context-menu";
 import { showFormationScreen } from "./formation-screen";
-import { appendTravelingUnit } from "../store-actions";
 import {
   getUnitSelectSnapshot,
   renderAvailableUnits,
@@ -37,12 +32,24 @@ import {
 let unitSelectEl: HTMLDivElement;
 let unitSelectEscapeHandler: ((e: KeyboardEvent) => void) | null = null;
 
+function setUnitSelectError(message: string | null): void {
+  const el = unitSelectEl.querySelector<HTMLParagraphElement>("[data-unit-error]");
+  if (!el) return;
+  if (message) {
+    el.textContent = message;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+
 export function createUnitSelectElement(): HTMLDivElement {
   unitSelectEl = document.createElement("div");
   unitSelectEl.className = "unit-select-overlay";
   unitSelectEl.innerHTML = `
     <div class="unit-select-modal">
       <div class="unit-select-title" data-unit-title>ユニットを選択</div>
+      <p class="unit-select-error" data-unit-error hidden></p>
       <div class="unit-select-panel-form" data-unit-panel-form style="display:none">
         <div class="unit-select-troops" data-unit-troops>編成済みユニットから送るユニットを選んでください</div>
         <div class="unit-select-unit-list" data-unit-list></div>
@@ -61,8 +68,10 @@ export function createUnitSelectElement(): HTMLDivElement {
           <div class="unit-select-returning-title">帰還中</div>
           <div class="unit-select-returning-list" data-unit-returning-list-empty></div>
         </div>
-        <button type="button" class="primary" data-unit-open-formation>編成画面を開く</button>
-        <button type="button" class="secondary" data-unit-cancel-empty>キャンセル</button>
+        <div class="unit-select-actions">
+          <button type="button" class="secondary" data-unit-cancel-empty>キャンセル</button>
+          <button type="button" class="primary" data-unit-open-formation>編成画面を開く</button>
+        </div>
       </div>
     </div>
   `;
@@ -73,6 +82,7 @@ export function createUnitSelectElement(): HTMLDivElement {
 export function showUnitSelect(pending: PendingUnitAction): void {
   if (!pending) return;
   setPendingUnitAction(pending);
+  setUnitSelectError(null);
   const titleEl = unitSelectEl.querySelector("[data-unit-title]")!;
   const panelForm = unitSelectEl.querySelector("[data-unit-panel-form]") as HTMLElement;
   const panelEmpty = unitSelectEl.querySelector("[data-unit-panel-empty]") as HTMLElement;
@@ -81,6 +91,8 @@ export function showUnitSelect(pending: PendingUnitAction): void {
 
   if (pending.type === "attack") {
     titleEl.textContent = "攻撃するユニットを選択";
+  } else if (pending.type === "explore") {
+    titleEl.textContent = "探索するユニットを選択";
   } else {
     titleEl.textContent = "援軍するユニットを選択";
   }
@@ -200,94 +212,108 @@ function setupUnitSelect(): void {
       return;
     }
     if (ws?.readyState !== WebSocket.OPEN) {
-      alert("サーバーに接続されていません。接続後にもう一度決定してください。");
+      setUnitSelectError("サーバーに接続されていません。接続後にもう一度決定してください。");
       return;
     }
     const listEl = unitSelectEl.querySelector("[data-unit-list]")!;
     const checked = listEl.querySelector<HTMLInputElement>('input[name="unit-select-one"]:checked');
     const selectedId = checked?.dataset.unitId ?? null;
     if (!selectedId) {
-      alert("送信するユニットを一覧から選んでください（ラジオボタン）。");
+      setUnitSelectError("送信するユニットを一覧から選んでください。");
       return;
     }
     const unit = formedUnitsList.find((u) => u.id === selectedId);
     if (!unit) {
-      alert("選択したユニットが見つかりません。一覧を更新してからもう一度選んでください。");
+      setUnitSelectError("選択したユニットが見つかりません。一覧を更新してからもう一度選んでください。");
       return;
     }
     if (!isKcUnitReadyToDeploy(unit.indices)) {
-      alert("リーダー枠にキャラがいないユニットは出撃できません。編成画面でリーダーを配置してください。");
+      setUnitSelectError("リーダー枠にキャラがいないユニットは出撃できません。編成画面でリーダーを配置してください。");
       return;
     }
     const bodyIdxOrder = formationBodyIndicesInSlotOrder(unit.indices);
-    const count = bodyIdxOrder.length;
+    let dispatchIndices = bodyIdxOrder;
+    if (pending.type === "explore") {
+      const playerId = getLocalPlayerId();
+      const exploreLevel = gameState.players[playerId]?.exploration_level ?? 1;
+      const maxSlots = explorationMaxSlots(exploreLevel);
+      const activeBodies = activeExploreBodiesInFlight(getPlayerMarches(gameState, playerId));
+      const slotsRemaining = maxSlots - activeBodies;
+      if (slotsRemaining <= 0) {
+        setUnitSelectError("これ以上探索を出せません。進行中の探索が終わるまでお待ちください。");
+        return;
+      }
+      if (bodyIdxOrder.length > slotsRemaining) {
+        dispatchIndices = bodyIdxOrder.slice(0, slotsRemaining);
+      }
+    }
+    const count = dispatchIndices.length;
     if (count === 0) {
-      alert("このユニットに出撃する体がありません。");
+      setUnitSelectError("このユニットに出撃する体がありません。");
       return;
     }
     const owned = getPlayerOwnedCards(gameState, getLocalPlayerId());
-    const monstersPerBody = bodyIdxOrder.map((i) => bodyMonsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT);
-    const speedPerBody = bodyIdxOrder.map((i) => bodySpeeds[i] ?? DEFAULT_BODY_SPEED);
-    const bodyNames = bodyIdxOrder.map((i) => {
+    const monstersPerBody = dispatchIndices.map((i) => bodyMonsterCounts[i] ?? DEFAULT_BODY_MONSTER_COUNT);
+    const speedPerBody = dispatchIndices.map((i) => {
+      const cid = owned[i] ?? 0;
+      return getEffectiveCardStats(cid, i, gameState, getLocalPlayerId()).speed;
+    });
+    const bodyNames = dispatchIndices.map((i) => {
       const cid = owned[i] ?? 0;
       return getBodyDisplayName(cid);
     });
-    const skillsPerBody = bodyIdxOrder.map((i) => {
+    const skillsPerBody = dispatchIndices.map((i) => {
       const cid = owned[i] ?? 0;
       return getCharacterSkillData(cid);
     });
-    const statsPerBody = bodyIdxOrder.map((i) => {
+    const statsPerBody = dispatchIndices.map((i) => {
       const cid = owned[i] ?? 0;
-      const s = getCharacterStats(cid);
+      const s = getEffectiveCardStats(cid, i, gameState, getLocalPlayerId());
       const mc = bodyMonsterCounts[i] ?? s.monster_count;
-      return {
-        monster_count: mc,
-        speed: s.speed,
-        attack: s.attack,
-        intelligence: s.intelligence,
-        defense: s.defense,
-        magic_defense: s.magicDefense,
-        range: s.range,
-        cost: s.cost,
-        occupation_power: s.occupationPower,
-      };
+      return { ...cardStatsToPayload(s), monster_count: mc };
     });
-    const ownedCardIndices = resolveOwnedCardIndices(bodyIdxOrder, owned);
+    const ownedCardIndices = resolveOwnedCardIndices(dispatchIndices, owned);
     if (!ownedCardIndices) {
-      alert(
+      setUnitSelectError(
         "このユニットの体番号と、本拠の所持魔獣スロットが一致しません。編成の体番号をスロット内に収めるか、編成し直してください。",
       );
       return;
     }
-    const targetId = pending.type === "attack" ? pending.toId : pending.territoryId;
-    const { avgSpeed } = recalcUnitStats(unit.indices, bodyMonsterCounts, bodySpeeds);
-    const distance = getDistanceFromHome(
-      targetId,
-      getPlayerHomeTerritoryId(gameState, getLocalPlayerId()),
-    );
-    const travelTimeMs = getTravelTimeMs(distance, avgSpeed);
 
-    const traveling: TravelingUnit = {
-      id: `travel-${getNextTravelingId()}`,
-      unitId: unit.id,
-      unitName: unit.name,
-      actionType: pending.type === "attack" ? "attack" : "deploy",
-      targetId,
-      fromId: pending.type === "attack" ? pending.fromId : undefined,
-      count,
+    let kind: MarchKind;
+    let fromId: string;
+    let toId: string;
+    let formedUnitId: string | undefined;
+
+    if (pending.type === "attack") {
+      kind = "attack";
+      fromId = pending.fromId;
+      toId = pending.toId;
+      formedUnitId = unit.id;
+    } else if (pending.type === "explore") {
+      kind = "explore";
+      fromId = pending.fromId;
+      toId = pending.toId;
+      // 探索は同時派遣数に応じて体を分けて送る（編成ユニット全体のロックはしない）
+      formedUnitId = undefined;
+    } else {
+      kind = "deploy";
+      fromId = getPlayerHomeTerritoryId(gameState, getLocalPlayerId());
+      toId = pending.territoryId;
+      formedUnitId = unit.id;
+    }
+
+    ws.send(JSON.stringify(startMarchAction(kind, fromId, toId, count, {
       monstersPerBody,
-      speedPerBody,
       bodyNames,
+      unitName: unit.name,
+      speedPerBody,
       skillsPerBody,
       statsPerBody,
       ownedCardIndices,
-      departureTime: Date.now(),
-      arrivalTime: Date.now() + travelTimeMs,
-    };
-    appendTravelingUnit(traveling);
-    startTravelIntervalIfNeeded();
+      formedUnitId,
+    })));
 
-    if (pending.type === "attack") setAttackSourceId(null);
     closeUnitSelect();
     closeMenu();
     render();

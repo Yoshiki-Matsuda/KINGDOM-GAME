@@ -4,6 +4,7 @@
 
 import { setCurrentScreen, render, gameState, ws, getLocalPlayerId } from "../store";
 import type { Alliance } from "../shared/game-state";
+import { renderScreenHeaderTitle } from "./screen-header";
 
 let allianceEl: HTMLDivElement | null = null;
 
@@ -31,7 +32,7 @@ export function renderAlliance(): void {
 
   allianceEl.innerHTML = `
     <div class="sub-screen-header">
-      <h2>⚜️ 同盟</h2>
+      <h2>${renderScreenHeaderTitle("alliance", "同盟")}</h2>
     </div>
     <div class="sub-screen-content">
       ${alliance

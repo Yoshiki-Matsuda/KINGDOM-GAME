@@ -1,145 +1,100 @@
 import { USE_MOCK_STATE } from "./config";
+import { applyInitialGameMode } from "./network/mode-switch";
 
 import { ensureDevUnit } from "./game/formation";
 
-import { focusMapOnPlayerHome, initMapView } from "./map-view";
+import { initMapView, waitForMapContainerLayout, wakeMapView } from "./map-view";
 
-import { resetAuthSession } from "./network/auth-client";
+import { ensureAuthSession, resetAuthSession } from "./network/auth-client";
 import { ensureValidAuthSession, loadGameState, relogin } from "./network/session";
 
 import { connect } from "./network/ws-client";
 
-import { authToken } from "./store";
-
+import { gameState, setConnectionStatus } from "./store";
 import type { Territory } from "./store";
 
-
-
 interface BootstrapOptions {
-
   mapContainer: HTMLDivElement;
-
   closeMenu: () => void;
-
   closeUnitSelect: () => void;
-
   onTerritoryClick: (territoryId: string, territory: Territory, screenX: number, screenY: number) => void;
-
   render: () => void;
-
 }
-
-
 
 export function bindGlobalMenuDismiss(menuEl: HTMLDivElement, closeMenu: () => void): void {
-
   document.addEventListener("pointerdown", (event) => {
-
     if (!menuEl.contains(event.target as Node)) {
-
       closeMenu();
-
     }
-
   });
-
 }
 
-
-
-export async function bootstrapApp(options: BootstrapOptions): Promise<void> {
-
-  let mapReadyPromise: Promise<void> | null = null;
-
-  const ensureMapReady = async () => {
-
-    if (!mapReadyPromise) {
-
-      mapReadyPromise = initMapView(options.mapContainer, {
-
-        onTerritoryClick: options.onTerritoryClick,
-
-      });
-
+async function startOnlineSession(
+  options: BootstrapOptions & { prepareMapSession: () => Promise<void> },
+): Promise<void> {
+  let token = await ensureValidAuthSession();
+  while (token) {
+    if (await loadGameState(token)) {
+      break;
     }
-
-    await mapReadyPromise;
-
-  };
-
-
-
-  const sessionOptions = { ...options, ensureMapReady };
-
-
-
-  if (USE_MOCK_STATE) {
-
-    await ensureMapReady();
-
-    ensureDevUnit();
-
-    options.render();
-    focusMapOnPlayerHome();
-
-    return;
-
-  }
-
-
-
-  if (new URLSearchParams(location.search).has("relogin")) {
-
-    await relogin(sessionOptions);
-    focusMapOnPlayerHome();
-    return;
-
-  }
-
-
-
-  const token = await ensureValidAuthSession();
-
-  if (!token) {
-
-    options.render();
-
-    return;
-
-  }
-
-
-
-  await ensureMapReady();
-
-  const loaded = await loadGameState(token);
-  if (!loaded) {
     resetAuthSession();
     options.render();
-    return;
+    token = await ensureAuthSession({ force: true });
   }
-
-  options.render();
-  focusMapOnPlayerHome();
-
-  if (!authToken) {
-
+  if (!token) {
     options.render();
-
     return;
-
   }
 
-
-
+  await options.prepareMapSession();
   connect({
-
     closeMenu: options.closeMenu,
-
     closeUnitSelect: options.closeUnitSelect,
-
   });
-
 }
 
+export async function bootstrapApp(options: BootstrapOptions): Promise<void> {
+  await applyInitialGameMode();
+  options.render();
 
+  let mapReadyPromise: Promise<void> | null = null;
+  const ensureMapReady = async () => {
+    if (!mapReadyPromise) {
+      mapReadyPromise = initMapView(options.mapContainer, {
+        onTerritoryClick: options.onTerritoryClick,
+      });
+    }
+    await mapReadyPromise;
+  };
+
+  const prepareMapSession = async () => {
+    setConnectionStatus("online");
+    options.render();
+    await waitForMapContainerLayout(options.mapContainer);
+    await ensureMapReady();
+    wakeMapView(gameState);
+  };
+
+  const sessionOptions = { ...options, prepareMapSession };
+
+  try {
+    if (USE_MOCK_STATE) {
+      ensureDevUnit();
+      await prepareMapSession();
+      return;
+    }
+
+    if (new URLSearchParams(location.search).has("relogin")) {
+      await relogin(sessionOptions);
+      return;
+    }
+
+    await startOnlineSession(sessionOptions);
+  } catch (error) {
+    console.error("bootstrap failed:", error);
+    resetAuthSession();
+    options.render();
+    await ensureAuthSession({ force: true });
+    options.render();
+  }
+}

@@ -394,3 +394,44 @@ pub fn add_items_to_inventory(inventory: &mut Vec<InventoryItem>, items: Vec<Inv
     }
 }
 
+/// 戦利品を適用（ゴールドは通貨 `resources.gold` へ、それ以外はインベントリへ）
+pub fn apply_item_rewards(
+    inventory: &mut Vec<InventoryItem>,
+    player_gold: &mut u64,
+    drops: Vec<InventoryItem>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for drop in drops {
+        if drop.item_id == GOLD {
+            *player_gold = player_gold.saturating_add(drop.count as u64);
+            lines.push(format!("ゴールド+{} を入手！", drop.count));
+        } else {
+            let label = item_name(&drop.item_id);
+            lines.push(format!("{}x{} を入手！", label, drop.count));
+            add_items_to_inventory(inventory, vec![drop]);
+        }
+    }
+    lines
+}
+
+/// 旧データ: インベントリ上のゴールドを通貨 `resources.gold` へ統合
+pub fn migrate_inventory_gold_to_resources(state: &mut crate::model::GameState) -> bool {
+    let mut changed = false;
+    for player in state.players.values_mut() {
+        let mut inv_gold = 0u64;
+        player.inventory.retain(|item| {
+            if item.item_id == GOLD {
+                inv_gold += item.count as u64;
+                false
+            } else {
+                true
+            }
+        });
+        if inv_gold > 0 {
+            player.resources.gold = player.resources.gold.saturating_add(inv_gold);
+            changed = true;
+        }
+    }
+    changed
+}
+

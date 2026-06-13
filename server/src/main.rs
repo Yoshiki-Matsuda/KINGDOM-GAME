@@ -1,11 +1,15 @@
 //! キングダム戦略ゲーム — Rust バックエンド
 //!
-//! - HTTP: /health, /api, /api/state, POST /admin/wipe（ワイプ時のみ完全初期化）
-//! - WebSocket: /ws — 接続時に状態送信、行動メッセージ受信で状態更新し全クライアントに配信
-//! - 永続化: 起動時に data/state.json をロード、行動ごとに保存。サーバー再起動で状態復元。
+//! - HTTP: /health, /api, /api/state, POST /admin/wipe
+//! - WebSocket: /ws — 接続時に状態送信、行動メッセージ受信で状態更新
+//! - PVP: 共有ワールド (SERVER_MODE=pvp, 既定ポート3000)
+//! - PVE: プレイヤー別ワールド (SERVER_MODE=pve, 既定ポート3001)
 
+mod ai_actions;
+mod ai_kingdom_scheduler;
 mod app_state;
 mod auth;
+mod config;
 mod dev_bot;
 mod game_log;
 mod cards;
@@ -15,91 +19,145 @@ mod items;
 mod model;
 mod model_actions;
 mod model_ruins;
+mod paths;
 mod persistence;
+mod pve_world;
 mod realtime;
 mod ruins;
-mod ruin_scheduler;
+mod server_mode;
 mod skills;
+mod world_manager;
+mod world_scheduler;
+mod march_scheduler;
 
 use axum::{routing::{get, post}, Router};
 use std::{net::SocketAddr, sync::Arc};
-use tokio::sync::{broadcast, Mutex, RwLock};
-use tower_http::cors::{Any, CorsLayer};
-use app_state::AppState;
-use model::{cleanup_expired_ruins, ensure_player_in_game, GameState, TEST_PLAYER_IDS};
-use persistence::{load_state, save_state, state_path};
-use ruin_scheduler::spawn_ruin_scheduler;
-
-// ---------- main ----------
+use tokio::sync::{broadcast, Mutex, Notify, RwLock};
+use app_state::{AppState, GameStore};
+use model::{cleanup_expired_ruins, ensure_player_in_game, GameState, TEST_PLAYER_IDS, WorldConfig};
+use paths::project_root;
+use persistence::{
+    auth_path, load_state, migrate_legacy_pvp_state, save_state, state_path_for_mode,
+};
+use server_mode::ServerMode;
+use world_manager::{spawn_world_eviction, WorldManager};
+use world_scheduler::spawn_world_scheduler;
+use march_scheduler::spawn_march_scheduler;
 
 #[tokio::main]
 async fn main() {
-    let state_path = state_path();
-    let auth_path = std::path::PathBuf::from("data/auth.json");
-    let mut game = match load_state(&state_path).await {
-        Some(loaded) => {
-            println!("[kingdom-server] 保存済み状態を読み込みました: {}", state_path.display());
-            loaded
+    let server_mode = ServerMode::from_env();
+    let world_config = WorldConfig::from_env();
+    let state_path = state_path_for_mode(server_mode);
+    let auth_path = auth_path();
+    println!(
+        "[kingdom-server] project_root={}",
+        project_root().display()
+    );
+
+    if server_mode == ServerMode::Pvp {
+        migrate_legacy_pvp_state(&state_path).await;
+    }
+
+    let store = match server_mode {
+        ServerMode::Pvp => {
+            let mut game = match load_state(&state_path).await {
+                Some(loaded) => {
+                    println!(
+                        "[kingdom-server] PVP保存済み状態を読み込みました: {}",
+                        state_path.display()
+                    );
+                    loaded
+                }
+                None => {
+                    let mut default = GameState::default();
+                    default.world = world_config;
+                    let _ = save_state(&state_path, &default).await;
+                    println!(
+                        "[kingdom-server] PVP新規ゲームを初期化: {}",
+                        state_path.display()
+                    );
+                    default
+                }
+            };
+
+            model::migrate_log_timestamps(&mut game);
+            model::migrate_legacy_neutral_enemies(&mut game);
+            let _ = crate::items::migrate_inventory_gold_to_resources(&mut game);
+            for &player_id in TEST_PLAYER_IDS {
+                if let Err(e) = ensure_player_in_game(&mut game, player_id) {
+                    eprintln!(
+                        "[kingdom-server] 警告: {player_id} をゲームに追加できません: {e}"
+                    );
+                }
+            }
+            model::refresh_all_test_players(&mut game);
+            let _ = save_state(&state_path, &game).await;
+
+            if cleanup_expired_ruins(&mut game) {
+                let _ = save_state(&state_path, &game).await;
+                println!("[kingdom-server] 期限切れの遺跡をクリーンアップしました");
+            }
+
+            GameStore::Shared(Arc::new(RwLock::new(game)))
         }
-        None => {
-            let default = GameState::default();
-            let _ = save_state(&state_path, &default).await;
-            println!("[kingdom-server] 新規ゲームを初期化し保存しました: {}", state_path.display());
-            default
+        ServerMode::Pve => {
+            if let Some(parent) = state_path.parent() {
+                let _ = tokio::fs::create_dir_all(parent).await;
+            }
+            println!(
+                "[kingdom-server] PVEモード: ワールドは接続時に生成 ({})",
+                state_path.display()
+            );
+            let mgr = Arc::new(WorldManager::new(state_path.clone(), world_config));
+            spawn_world_eviction(mgr.clone());
+            GameStore::PerPlayer(mgr)
         }
     };
-
-    model::migrate_log_timestamps(&mut game);
-    model::migrate_legacy_neutral_enemies(&mut game);
-    for &player_id in TEST_PLAYER_IDS {
-        ensure_player_in_game(&mut game, player_id);
-    }
-    model::refresh_all_test_players(&mut game);
-
-    let _ = save_state(&state_path, &game).await;
 
     if let Err(e) = auth::ensure_dev_auth_users(&auth_path).await {
         eprintln!("[kingdom-server] テスト用アカウントの初期化に失敗: {e}");
         std::process::exit(1);
     }
 
-    // 起動時に期限切れの遺跡をクリーンアップ
-    if cleanup_expired_ruins(&mut game) {
-        let _ = save_state(&state_path, &game).await;
-        println!("[kingdom-server] 期限切れの遺跡をクリーンアップしました");
-    }
-
-    let dev_auto_win = std::env::var("DEV_AUTO_WIN")
-        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
-        .unwrap_or(false);
+    let dev_auto_win = config::dev_auto_win_enabled();
     if dev_auto_win {
-        println!(
-            "[kingdom-server] DEV_AUTO_WIN=1: 攻撃側10倍有利 + 敵BOT（player）が既存WS経由で自動攻撃"
-        );
+        match server_mode {
+            ServerMode::Pvp => println!(
+                "[kingdom-server] DEV_AUTO_WIN=1: 攻撃ダメージ10倍 + 所持魔獣スタミナ無限 + 敵BOT（player）が既存WS経由で自動攻撃"
+            ),
+            ServerMode::Pve => println!(
+                "[kingdom-server] DEV_AUTO_WIN=1: 攻撃ダメージ10倍 + 所持魔獣スタミナ無限"
+            ),
+        }
     }
 
-    // 戦闘処理中にブロードキャストが留まりすぎると RecvError::Lagged になるため余裕を持たせる
     let (broadcast_tx, _) = broadcast::channel(256);
-    let jwt_secret = std::env::var("AUTH_JWT_SECRET")
-        .unwrap_or_else(|_| "dev-only-change-this-secret".to_string())
-        .into_bytes();
+    let jwt_secret = config::jwt_secret_bytes();
     let app_state = AppState {
-        game: Arc::new(RwLock::new(game)),
+        server_mode,
+        store,
         mutation_lock: Arc::new(Mutex::new(())),
         broadcast_tx,
         state_path,
         auth_path,
         jwt_secret: Arc::new(jwt_secret),
         dev_auto_win,
+        world_config,
+        march_wake: Arc::new(Notify::new()),
     };
 
-    // 遺跡スポーン用のバックグラウンドタスク（Routerに渡す前にclone）
-    let ruin_state = app_state.clone();
+    spawn_world_scheduler(app_state.clone());
+    spawn_march_scheduler(app_state.clone());
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    if server_mode == ServerMode::Pve {
+        ai_kingdom_scheduler::spawn_ai_kingdom_scheduler(app_state.clone());
+    }
+
+    let cors = tower_http::cors::CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any);
 
     let app = Router::new()
         .route("/health", get(http_api::health))
@@ -108,56 +166,44 @@ async fn main() {
         .route("/api/whoami", get(http_api::api_whoami))
         .route("/auth/register", post(http_api::auth_register))
         .route("/auth/login", post(http_api::auth_login))
+        .route("/auth/exchange", post(http_api::auth_exchange))
         .route("/admin/wipe", post(http_api::admin_wipe))
         .route("/ws", get(realtime::ws_handler))
         .layer(cors)
-        .with_state(app_state);
-    spawn_ruin_scheduler(ruin_state);
+        .with_state(app_state.clone());
 
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(3000);
+    let port = config::listen_port(server_mode);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    println!("[kingdom-server] listening on http://{}", addr);
+    println!(
+        "[kingdom-server] mode={} listening on http://{}",
+        server_mode.as_str(),
+        addr
+    );
     println!("  GET /health      -> ヘルスチェック");
     println!("  GET /api/state   -> 現在のゲーム状態（JSON）");
     println!(
-        "  POST /admin/wipe -> ワイプ（完全初期化。メンテ再起動では使わない）curl -X POST http://127.0.0.1:{}/admin/wipe",
+        "  POST /admin/wipe -> ワイプ curl -X POST http://127.0.0.1:{}/admin/wipe",
         port
     );
-    println!(
-        "  テスト用アカウント: offline_test（人間）/ player（敵BOT）パスワード test12345"
-    );
-    println!(
-        "  ローカル開発: DEV_AUTO_WIN=1 cargo run（攻撃有利+敵BOT自動起動）/ BOTのみ: DEV_BOT=1 cargo run"
-    );
     println!("  GET /ws          -> WebSocket（状態配信・行動受付）");
-    println!("  行動例: 送信 {{\"action\":\"end_turn\"}} でターン進行");
-    println!("  遺跡: 60秒ごとにスポーン判定、最大3個");
-    println!("  （ポートが使用中なら: 別ターミナルのサーバーを止めるか PORT=3001 などで起動）");
+    println!("  遺跡: 60秒ごとにスポーン判定、最大3個/ワールド");
 
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            eprintln!(
-                "[kingdom-server] エラー: {} は既に使用中です（別の kingdom-server や他プロセスを終了するか PORT 環境変数で別ポートを指定してください）。",
-                addr
-            );
+            eprintln!("[kingdom-server] エラー: {} は既に使用中です。", addr);
             std::process::exit(1);
         }
         Err(e) => panic!("bind: {e}"),
     };
 
-    if let Some(bot_config) = dev_bot::DevBotConfig::from_env(port) {
-        println!(
-            "  敵BOT: {} → {}（既存 /auth/login + /ws）",
-            bot_config.username, bot_config.target_player
-        );
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            dev_bot::run(bot_config).await;
-        });
+    if server_mode == ServerMode::Pvp {
+        if let Some(bot_config) = dev_bot::DevBotConfig::from_env(port) {
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                dev_bot::run(bot_config).await;
+            });
+        }
     }
 
     axum::serve(listener, app).await.expect("serve");

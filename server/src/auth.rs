@@ -8,10 +8,10 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use serde::{Deserialize, Serialize};
 
 use crate::model::{ensure_player_in_game, GameState, TEST_PLAYER_IDS};
+use crate::config;
+use crate::server_mode::ServerMode;
 
 const TOKEN_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
-/// フロントの `VITE_DEV_PASSWORD` 既定値と揃える
-const DEFAULT_DEV_AUTH_PASSWORD: &str = "test12345";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AuthUser {
@@ -29,6 +29,7 @@ pub(crate) struct AuthStore {
 pub(crate) struct AuthClaims {
     pub(crate) sub: String,
     pub(crate) username: String,
+    pub(crate) mode: String,
     exp: usize,
 }
 
@@ -47,7 +48,7 @@ pub(crate) struct AuthResponse {
 
 /// 開発用テストアカウントが未登録なら `data/auth.json` に追加する。
 pub(crate) async fn ensure_dev_auth_users(path: &Path) -> Result<(), String> {
-    let password = std::env::var("DEV_AUTH_PASSWORD").unwrap_or_else(|_| DEFAULT_DEV_AUTH_PASSWORD.to_string());
+    let password = config::dev_auth_password();
     validate_password(&password)?;
 
     let mut store = load_store(path).await;
@@ -91,7 +92,8 @@ async fn save_store(path: &Path, store: &AuthStore) -> Result<(), String> {
 pub(crate) async fn register(
     path: &Path,
     jwt_secret: &[u8],
-    game: &mut GameState,
+    server_mode: ServerMode,
+    game: Option<&mut GameState>,
     req: AuthRequest,
 ) -> Result<AuthResponse, String> {
     let username = normalize_username(&req.username)?;
@@ -111,15 +113,18 @@ pub(crate) async fn register(
     });
     save_store(path, &store).await?;
 
-    ensure_player_in_game(game, &player_id);
-    let token = issue_token(jwt_secret, &player_id, &username)?;
+    if let Some(game) = game {
+        ensure_player_in_game(game, &player_id)?;
+    }
+    let token = issue_token(jwt_secret, &player_id, &username, server_mode)?;
     Ok(AuthResponse { token, player_id, username })
 }
 
 pub(crate) async fn login(
     path: &Path,
     jwt_secret: &[u8],
-    game: &mut GameState,
+    server_mode: ServerMode,
+    game: Option<&mut GameState>,
     req: AuthRequest,
 ) -> Result<AuthResponse, String> {
     let username = normalize_username(&req.username)?;
@@ -129,8 +134,10 @@ pub(crate) async fn login(
     };
     verify_password(&req.password, &user.password_hash)?;
 
-    ensure_player_in_game(game, &user.player_id);
-    let token = issue_token(jwt_secret, &user.player_id, &user.username)?;
+    if let Some(game) = game {
+        ensure_player_in_game(game, &user.player_id)?;
+    }
+    let token = issue_token(jwt_secret, &user.player_id, &user.username, server_mode)?;
     Ok(AuthResponse {
         token,
         player_id: user.player_id.clone(),
@@ -138,7 +145,26 @@ pub(crate) async fn login(
     })
 }
 
-pub(crate) fn verify_token(jwt_secret: &[u8], token: &str) -> Result<AuthClaims, String> {
+/// 他モードの JWT から、このサーバーの mode 付きトークンを再発行する（HUD 切替用）
+pub(crate) async fn exchange_token(
+    jwt_secret: &[u8],
+    server_mode: ServerMode,
+    game: Option<&mut GameState>,
+    token: &str,
+) -> Result<AuthResponse, String> {
+    let claims = verify_token_signature(jwt_secret, token)?;
+    if let Some(game) = game {
+        ensure_player_in_game(game, &claims.sub)?;
+    }
+    let new_token = issue_token(jwt_secret, &claims.sub, &claims.username, server_mode)?;
+    Ok(AuthResponse {
+        token: new_token,
+        player_id: claims.sub,
+        username: claims.username,
+    })
+}
+
+fn decode_claims(jwt_secret: &[u8], token: &str) -> Result<AuthClaims, String> {
     let mut validation = Validation::default();
     validation.validate_exp = true;
     decode::<AuthClaims>(
@@ -150,17 +176,41 @@ pub(crate) fn verify_token(jwt_secret: &[u8], token: &str) -> Result<AuthClaims,
     .map_err(|_| "認証トークンが無効です。".to_string())
 }
 
+/// 署名・有効期限のみ検証（exchange 用。mode は問わない）
+pub(crate) fn verify_token_signature(jwt_secret: &[u8], token: &str) -> Result<AuthClaims, String> {
+    decode_claims(jwt_secret, token)
+}
+
+/// このサーバーの mode と一致するトークンのみ許可
+pub(crate) fn verify_token_for_mode(
+    jwt_secret: &[u8],
+    token: &str,
+    expected_mode: ServerMode,
+) -> Result<AuthClaims, String> {
+    let claims = decode_claims(jwt_secret, token)?;
+    if claims.mode != expected_mode.as_str() {
+        return Err("このトークンは別モード用です。".to_string());
+    }
+    Ok(claims)
+}
+
 pub(crate) fn bearer_token(value: &str) -> Option<&str> {
     value.strip_prefix("Bearer ").filter(|token| !token.trim().is_empty())
 }
 
-fn issue_token(jwt_secret: &[u8], player_id: &str, username: &str) -> Result<String, String> {
+fn issue_token(
+    jwt_secret: &[u8],
+    player_id: &str,
+    username: &str,
+    server_mode: ServerMode,
+) -> Result<String, String> {
     let exp = time::OffsetDateTime::now_utc()
         .unix_timestamp()
         .saturating_add(TOKEN_TTL_SECONDS) as usize;
     let claims = AuthClaims {
         sub: player_id.to_string(),
         username: username.to_string(),
+        mode: server_mode.as_str().to_string(),
         exp,
     };
     encode(
@@ -207,4 +257,31 @@ fn verify_password(password: &str, password_hash: &str) -> Result<(), String> {
     Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
         .map_err(|_| "ユーザー名またはパスワードが違います。".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn secret() -> Vec<u8> {
+        b"test-secret-for-jwt-mode".to_vec()
+    }
+
+    #[test]
+    fn issue_and_verify_mode_bound_token() {
+        let token = issue_token(&secret(), "player_a", "player_a", ServerMode::Pve).unwrap();
+        let ok = verify_token_for_mode(&secret(), &token, ServerMode::Pve).unwrap();
+        assert_eq!(ok.sub, "player_a");
+        assert_eq!(ok.mode, "pve");
+        assert!(verify_token_for_mode(&secret(), &token, ServerMode::Pvp).is_err());
+    }
+
+    #[test]
+    fn exchange_accepts_cross_mode_signature() {
+        let pve_token = issue_token(&secret(), "u1", "u1", ServerMode::Pve).unwrap();
+        let claims = verify_token_signature(&secret(), &pve_token).unwrap();
+        assert_eq!(claims.mode, "pve");
+        let pvp_token = issue_token(&secret(), &claims.sub, &claims.username, ServerMode::Pvp).unwrap();
+        verify_token_for_mode(&secret(), &pvp_token, ServerMode::Pvp).unwrap();
+    }
 }

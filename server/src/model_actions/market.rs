@@ -23,6 +23,13 @@ pub(super) fn apply_list_on_flea_market(
         return state.clone();
     }
 
+    if let MarketItemType::Card { card_id } = item {
+        if !crate::cards::card_has_illustration(*card_id) {
+            push_log(log, "この魔獣は出品できません。".to_string());
+            return state.clone();
+        }
+    }
+
     let mut new_state = state.clone();
     let item_desc = {
         let Some(player) = new_state.players.get_mut(actor_player_id) else {
@@ -138,6 +145,13 @@ pub(super) fn apply_buy_from_flea_market(
     if listing.seller_id == actor_player_id {
         push_log(log, "自分の出品は購入できません。".to_string());
         return state.clone();
+    }
+
+    if let MarketItemType::Card { card_id } = &listing.item {
+        if !crate::cards::card_has_illustration(*card_id) {
+            push_log(log, "この出品は購入できません。".to_string());
+            return state.clone();
+        }
     }
 
     let mut new_state = state.clone();

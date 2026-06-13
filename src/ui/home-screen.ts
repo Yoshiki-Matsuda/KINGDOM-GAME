@@ -37,6 +37,9 @@ import {
   renderPanelHeader,
 } from "../home-screen-panel";
 import { buildFacilityAction } from "../shared/game-state";
+import { showGameNotice } from "./game-notice";
+import { renderResourcesHtml } from "./hud";
+import { renderScreenHeaderTitle } from "./screen-header";
 
 let homeEl: HTMLDivElement;
 let gridContainer: HTMLDivElement;
@@ -190,12 +193,13 @@ function renderHomeContent(): void {
     homeEl.insertBefore(header, homeEl.firstChild);
   }
   header.innerHTML = `
-    <h1 class="home-screen-title">本拠地</h1>
+    <h1 class="home-screen-title">${renderScreenHeaderTitle("home", "本拠地")}</h1>
     <div class="home-screen-stats">
       <span>魔獣数: ${totalMonsters}</span>
       ${bonuses.monsterBonus > 0 ? `<span class="bonus">+${bonuses.monsterBonus}</span>` : ""}
       ${bonuses.monsterPercent > 0 ? `<span class="bonus">+${bonuses.monsterPercent}%</span>` : ""}
     </div>
+    ${renderResourcesHtml("hud-resources hud-resources--embedded")}
     <button type="button" class="home-screen-back" data-home-back>マップへ戻る</button>
   `;
   header.querySelector("[data-home-back]")?.addEventListener("click", () => {
@@ -411,7 +415,7 @@ function buildFacility(facilityId: FacilityId, level: number): void {
   }
 
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    alert("サーバーに接続されていません。");
+    showGameNotice("サーバーに接続されていません。");
     return;
   }
   ws.send(JSON.stringify(buildFacilityAction(facilityId, level, result.position)));

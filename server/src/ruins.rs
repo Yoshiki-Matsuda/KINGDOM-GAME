@@ -209,13 +209,27 @@ pub const RUIN_FORMATIONS: &[RuinFormation] = &[
     RuinFormation { name: "終焉の間", difficulty: RuinDifficulty::Legendary, enemies: [RuinEnemyType::TitanColossus, RuinEnemyType::DragonZombie, RuinEnemyType::LichLord] },
 ];
 
-/// ランダムな編成を取得
+/// 遺跡編成の全敵がイラストあり魔獣に解決するか
+fn formation_has_illustrated_enemies(formation: &RuinFormation) -> bool {
+    formation.enemies.iter().all(|enemy_type| {
+        let name = get_ruin_enemy(*enemy_type).name;
+        crate::cards::enemy_name_has_illustration(name)
+    })
+}
+
+/// ランダムな編成を取得（イラストあり敵のみ）
 pub fn get_random_formation(difficulty: Option<RuinDifficulty>) -> &'static RuinFormation {
     let mut rng = rand::thread_rng();
-    let filtered: Vec<&RuinFormation> = match difficulty {
-        Some(d) => RUIN_FORMATIONS.iter().filter(|f| f.difficulty == d).collect(),
-        None => RUIN_FORMATIONS.iter().collect(),
-    };
+    let filtered: Vec<&RuinFormation> = RUIN_FORMATIONS
+        .iter()
+        .filter(|f| {
+            difficulty.map_or(true, |d| f.difficulty == d) && formation_has_illustrated_enemies(f)
+        })
+        .collect();
+    if filtered.is_empty() {
+        // ゴーレム編成（石の番人）にフォールバック
+        return &RUIN_FORMATIONS[0];
+    }
     filtered[rng.gen_range(0..filtered.len())]
 }
 

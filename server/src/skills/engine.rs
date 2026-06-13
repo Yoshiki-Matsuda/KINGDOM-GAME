@@ -411,6 +411,7 @@ fn apply_effect_to_character_core(
         // ステータス変更系
         SkillEffectType::MonsterCountMultiply => {
             let before = character.current_monster_count;
+            character.startup_monster_factor *= effect.value;
             character.current_monster_count *= effect.value;
             Some(format!(
                 "魔獣数 {:.0} → {:.0}",
@@ -437,7 +438,7 @@ fn apply_effect_to_character_core(
             let before = character.current_speed;
             character.current_speed *= effect.value;
             Some(format!(
-                "SPEED {:.0} → {:.0}",
+                "速さ {:.0} → {:.0}",
                 before, character.current_speed
             ))
         }
@@ -445,7 +446,7 @@ fn apply_effect_to_character_core(
             let before = character.current_speed;
             character.current_speed += effect.value;
             Some(format!(
-                "SPEED {:.0} → {:.0}",
+                "速さ {:.0} → {:.0}",
                 before, character.current_speed
             ))
         }
@@ -665,12 +666,15 @@ fn apply_attack_effect(
         }
         SkillEffectType::DamageAdd => {
             if effect.target == SkillTarget::EnemySingle && effect.value < 1.0 {
-                let bonus = attacker.current_speed * effect.value;
+                let bonus = attacker.intelligence as f32 * effect.value;
                 modifiers.damage_add += bonus;
-                push_log(log, format!("  → +{:.0} ダメージ（SPEED補正）", bonus));
+                push_log(log, format!("  → +{:.0} ダメージ（知力補正）", bonus));
             } else {
-                modifiers.damage_add += effect.value;
-                push_log(log, format!("  → +{:.0} ダメージ", effect.value));
+                let scaled = effect.value
+                    * (attacker.intelligence as f32
+                        / crate::model::REF_INTELLIGENCE as f32);
+                modifiers.damage_add += scaled;
+                push_log(log, format!("  → +{:.0} ダメージ", scaled));
             }
         }
         SkillEffectType::ExtraAttack => {
@@ -684,15 +688,18 @@ fn apply_attack_effect(
         SkillEffectType::TrueDamage => {
             modifiers.ignore_defense = true;
             if effect.value > 0.0 {
+                let scaled = effect.value
+                    * (attacker.intelligence as f32
+                        / crate::model::REF_INTELLIGENCE as f32);
                 if effect.target == SkillTarget::EnemyAll {
-                    modifiers.aoe_damage += effect.value;
-                    push_log(log, format!("  → +{:.0} 全体固定ダメージ", effect.value));
+                    modifiers.aoe_damage += scaled;
+                    push_log(log, format!("  → +{:.0} 全体固定ダメージ", scaled));
                 } else {
-                    modifiers.true_damage += effect.value;
-                    push_log(log, format!("  → +{:.0} 固定ダメージ", effect.value));
+                    modifiers.true_damage += scaled;
+                    push_log(log, format!("  → +{:.0} 固定ダメージ", scaled));
                 }
             } else {
-                push_log(log, "  → 防御無視".to_string());
+                push_log(log, "  → 魔防無視".to_string());
             }
         }
         SkillEffectType::PercentDamage => {

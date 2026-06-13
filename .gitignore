@@ -34,3 +34,4 @@ Cargo.lock
 
 # サーバー永続化（ワイプ時以外は復元用。本番では別管理）
 server/data
+data

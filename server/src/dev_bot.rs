@@ -8,11 +8,12 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use crate::cards::{get_card, get_card_skills};
+use crate::config;
 use crate::model::{
     attack_base_owner_ids, is_attackable_target, parse_territory_id, territories_are_adjacent,
     Action, GameState, Territory,
 };
-use crate::model_actions::STAMINA_ATTACK_FOR_XP;
+use crate::model_actions::STAMINA_ATTACK;
 
 #[derive(Debug, Deserialize)]
 struct AuthResponse {
@@ -32,12 +33,7 @@ pub(crate) struct DevBotConfig {
 }
 
 pub(crate) fn is_enabled() -> bool {
-    let flag = |key: &str| {
-        std::env::var(key)
-            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
-            .unwrap_or(false)
-    };
-    flag("DEV_BOT") || flag("DEV_AUTO_WIN")
+    config::dev_bot_enabled()
 }
 
 impl DevBotConfig {
@@ -45,28 +41,33 @@ impl DevBotConfig {
         if !is_enabled() {
             return None;
         }
-        let username =
-            std::env::var("DEV_BOT_USERNAME").unwrap_or_else(|_| "player".to_string());
-        let password = std::env::var("DEV_BOT_PASSWORD")
-            .or_else(|_| std::env::var("DEV_AUTH_PASSWORD"))
-            .unwrap_or_else(|_| "test12345".to_string());
-        let target_player =
-            std::env::var("DEV_BOT_TARGET").unwrap_or_else(|_| "offline_test".to_string());
-        let interval_secs = std::env::var("DEV_BOT_INTERVAL_SEC")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(45);
-        let http_origin = std::env::var("DEV_BOT_HTTP_ORIGIN")
-            .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
-        let ws_url = std::env::var("DEV_BOT_WS_URL")
-            .unwrap_or_else(|_| format!("ws://127.0.0.1:{port}/ws"));
+        let username = config::env_string(
+            config::ENV_DEV_BOT_USERNAME,
+            config::DEFAULT_DEV_BOT_USERNAME,
+        );
+        let password = std::env::var(config::ENV_DEV_BOT_PASSWORD)
+            .or_else(|_| std::env::var(config::ENV_DEV_AUTH_PASSWORD))
+            .unwrap_or_else(|_| config::DEFAULT_DEV_AUTH_PASSWORD.to_string());
+        let target_player = config::env_string(
+            config::ENV_DEV_BOT_TARGET,
+            config::DEFAULT_DEV_BOT_TARGET,
+        );
+        let interval_secs = config::dev_bot_interval_secs();
+        let http_origin = config::env_string(
+            config::ENV_DEV_BOT_HTTP_ORIGIN,
+            &format!("http://127.0.0.1:{port}"),
+        );
+        let ws_url = config::env_string(
+            config::ENV_DEV_BOT_WS_URL,
+            &format!("ws://127.0.0.1:{port}/ws"),
+        );
         Some(Self {
             http_origin,
             ws_url,
             username,
             password,
             target_player,
-            interval: Duration::from_secs(interval_secs.max(10)),
+            interval: Duration::from_secs(interval_secs),
         })
     }
 }
@@ -283,8 +284,8 @@ fn build_home_expedition(
         if !seen_cards.insert(card_id) {
             continue;
         }
-        let stamina = player.card_stamina.get(idx).copied().unwrap_or(120);
-        if stamina < STAMINA_ATTACK_FOR_XP {
+        let stamina = player.card_stamina.get(idx).copied().unwrap_or(config::max_card_stamina());
+        if stamina < STAMINA_ATTACK {
             continue;
         }
         let card = get_card(card_id)?;
@@ -324,8 +325,8 @@ mod tests {
     #[test]
     fn plan_attack_prefers_target_player_territory() {
         let mut state = GameState::default();
-        ensure_player_in_game(&mut state, "player");
-        ensure_player_in_game(&mut state, "offline_test");
+        ensure_player_in_game(&mut state, "player").expect("first test player");
+        ensure_player_in_game(&mut state, "offline_test").expect("second test player");
         let bot_home = state
             .players
             .get("player")

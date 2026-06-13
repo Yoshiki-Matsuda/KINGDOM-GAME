@@ -183,6 +183,30 @@ pub const CARDS: &[CardDef] = &[
     CardDef { id: 114, name: "エルダーリッチ", rarity: CardRarity::Epic, race: Race::Undead, stats: CardStats { monster_count: 16, speed: 4, attack: 8, intelligence: 18, defense: 8, magic_defense: 16, range: 3, cost: 1.0, occupation_power: 90 }, default_skills: None },
 ];
 
+/// `public/cards/character-{id}.png` が存在する魔獣ID
+pub const ILLUSTRATED_CARD_IDS: &[u32] = &[
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    50, 51, 52, 53, 54, 55, 56,
+    60, 61, 62, 63, 64, 65, 66,
+    70, 71, 72, 73, 74,
+    80, 81, 82, 83,
+    90, 91, 92, 93,
+    100, 101, 102, 103, 104,
+    110, 111, 112, 113, 114,
+];
+
+/// 魔獣にイラスト画像が紐づいているか
+pub fn card_has_illustration(id: u32) -> bool {
+    ILLUSTRATED_CARD_IDS.binary_search(&id).is_ok()
+}
+
+/// 敵名がイラストあり魔獣に解決するか
+pub fn enemy_name_has_illustration(name: &str) -> bool {
+    get_card_id_by_name(name)
+        .map(card_has_illustration)
+        .unwrap_or(false)
+}
+
 /// 魔獣ID（card_id）から定義を取得
 pub fn get_card(id: u32) -> Option<&'static CardDef> {
     CARDS.iter().find(|c| c.id == id)
@@ -268,5 +292,33 @@ pub fn get_card_skills(card_id: u32) -> SkillData {
         Some(c) if c.default_skills.is_some() => c.default_skills.clone().unwrap(),
         Some(c) => fallback_npc_skill_data(c),
         None => SkillData::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn illustrated_ids_match_master_entries() {
+        for card in CARDS {
+            let has = card_has_illustration(card.id);
+            let in_list = ILLUSTRATED_CARD_IDS.contains(&card.id);
+            assert_eq!(
+                has, in_list,
+                "card {} ({}) illustration flag mismatch",
+                card.id, card.name
+            );
+        }
+    }
+
+    #[test]
+    fn illustrated_list_is_sorted_unique() {
+        let mut sorted = ILLUSTRATED_CARD_IDS.to_vec();
+        let len = sorted.len();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), len);
+        assert_eq!(sorted.as_slice(), ILLUSTRATED_CARD_IDS);
     }
 }

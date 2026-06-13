@@ -1,10 +1,12 @@
 import {
-  USE_MOCK_STATE, authToken, currentScreen, gameState, travelingUnits,
-  isPlayerIdentityResolved,
+  USE_MOCK_STATE, authToken, currentScreen, gameState,
+  isPlayerIdentityResolved, getLocalPlayerId,
 } from "./store";
-import { focusMapOnPlayerHome, updateMapView, setMapVisible } from "./map-view";
+import { updateMapView, setMapVisible, wakeMapView, type TravelingDestinationOverlay } from "./map-view";
+import { buildMarchMapOverlays } from "./game/march-overlays";
 import { renderHud } from "./ui/hud";
 import { renderLog } from "./ui/log-panel";
+import { updateHudSettings } from "./ui/hud-settings";
 import { updateBottomMenu } from "./ui/bottom-menu";
 import { renderInventory } from "./ui/inventory-screen";
 import { renderFleaMarket } from "./ui/flea-market-screen";
@@ -26,41 +28,40 @@ interface RenderElements {
   rankingEl: HTMLElement;
 }
 
-interface TravelingDestination {
-  targetId: string;
-  secLeft: number;
-  unitNames: string[];
-}
-
-function getTravelingDestinations(now: number = Date.now()): TravelingDestination[] | undefined {
-  if (travelingUnits.length === 0) return undefined;
-
-  const byTarget = new Map<string, TravelingDestination>();
-  for (const traveling of travelingUnits) {
-    const secLeft = (traveling.arrivalTime - now) / 1000;
-    if (secLeft <= 0) continue;
-
-    const existing = byTarget.get(traveling.targetId);
-    if (!existing) {
-      byTarget.set(traveling.targetId, {
-        targetId: traveling.targetId,
-        secLeft,
-        unitNames: [traveling.unitName],
-      });
-      continue;
-    }
-
-    existing.unitNames.push(traveling.unitName);
-    existing.secLeft = Math.min(existing.secLeft, secLeft);
-  }
-
-  return Array.from(byTarget.values());
+function getTravelingDestinations(now: number = Date.now()): TravelingDestinationOverlay[] {
+  return buildMarchMapOverlays(gameState, getLocalPlayerId(), now);
 }
 
 let mapWasVisible = false;
 
-export function createAppRenderer(elements: RenderElements): () => void {
-  return () => {
+export function createAppRenderer(elements: RenderElements): {
+  render: () => void;
+  renderMapSession: () => void;
+} {
+  const appEl = document.querySelector<HTMLDivElement>("#app");
+
+  const renderMapSession = () => {
+    if (currentScreen !== "map") return;
+
+    const sessionReady = USE_MOCK_STATE || (authToken != null && isPlayerIdentityResolved());
+    const canShowMap = sessionReady;
+
+    updateHudSettings();
+    updateBottomMenu();
+    setMapVisible(canShowMap);
+    if (canShowMap) {
+      if (!mapWasVisible) {
+        wakeMapView(gameState, getTravelingDestinations());
+      } else {
+        updateMapView(gameState, getTravelingDestinations());
+      }
+    }
+    mapWasVisible = canShowMap;
+    updateUnitSelectReturningList();
+  };
+
+  const render = () => {
+    const sessionReady = USE_MOCK_STATE || (authToken != null && isPlayerIdentityResolved());
     const isHome = currentScreen === "home";
     const isHistory = currentScreen === "history";
     const isMap = currentScreen === "map";
@@ -71,8 +72,11 @@ export function createAppRenderer(elements: RenderElements): () => void {
     const isStatus = currentScreen === "status";
     const isRanking = currentScreen === "ranking";
 
-    elements.homeEl.style.display = isHome ? "flex" : "none";
-    const canShowMap = isMap && (USE_MOCK_STATE || (authToken != null && isPlayerIdentityResolved()));
+    appEl?.setAttribute("data-screen", currentScreen);
+
+    const showHomeBackdrop = !USE_MOCK_STATE && !sessionReady;
+    elements.homeEl.style.display = isHome || showHomeBackdrop ? "flex" : "none";
+    const canShowMap = isMap && sessionReady;
     elements.mapContainer.style.display = canShowMap ? "block" : "none";
     elements.logEl.style.display = isHistory ? "flex" : "none";
     elements.inventoryEl.style.display = isInventory ? "flex" : "none";
@@ -91,13 +95,19 @@ export function createAppRenderer(elements: RenderElements): () => void {
 
     renderHud();
     renderLog();
+    updateHudSettings();
     updateBottomMenu();
     setMapVisible(canShowMap);
     if (canShowMap) {
-      updateMapView(gameState, getTravelingDestinations());
-      if (!mapWasVisible) focusMapOnPlayerHome();
+      if (!mapWasVisible) {
+        wakeMapView(gameState, getTravelingDestinations());
+      } else {
+        updateMapView(gameState, getTravelingDestinations());
+      }
     }
     mapWasVisible = canShowMap;
     updateUnitSelectReturningList();
   };
+
+  return { render, renderMapSession };
 }

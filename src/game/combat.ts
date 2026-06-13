@@ -8,6 +8,7 @@ import { gameState, getLocalPlayerId } from "../store";
 import {
   GRID_COLS,
   GRID_ROWS,
+  getMarchFromTerritory,
   getPlayerHomeTerritoryId,
   isPlayerHomeTile,
   tryParseTerritoryId,
@@ -51,36 +52,34 @@ export function canReceiveReinforcement(state: GameState, territory: Territory):
   return getDeployableOwnerIds(state, getLocalPlayerId()).includes(territory.owner_id);
 }
 
-/** 自陣営の領に隣接しているマスだけ攻撃可能（4方向隣接） */
+/** 自陣営の領に隣接しているマスだけ攻撃可能（4方向隣接・サーバー `is_attackable_target` 相当） */
 export function isAttackable(state: GameState, targetId: string): boolean {
-  return getAdjacentAttackSource(state, targetId) !== null;
-}
-
-/** 攻撃先に隣接する自陣営の領を1つ返す（本拠遠征: 隣接ルート用。本拠が隣なら本拠を優先） */
-export function getAdjacentAttackSource(state: GameState, targetId: string): string | null {
   const pos = tryParseTerritoryId(targetId);
-  if (!pos) return null;
+  if (!pos) return false;
   const { col, row } = pos;
   const territoryAt = getTerritoryAtMap(state);
   const territoryById = new Map(state.territories.map((t) => [t.id, t]));
   const baseOwners = new Set(getAttackBaseOwnerIds(state, getLocalPlayerId()));
-  const homeId = getPlayerHomeTerritoryId(state, getLocalPlayerId());
   const neighbors = [
     [col - 1, row],
     [col + 1, row],
     [col, row - 1],
     [col, row + 1],
   ].filter(([c, r]) => c >= 0 && c < GRID_COLS && r >= 0 && r < GRID_ROWS);
-  const ownedAdjacent: string[] = [];
   for (const [c, r] of neighbors) {
     const id = territoryAt.get(`${c},${r}`);
     if (!id) continue;
     const t = territoryById.get(id);
-    if (t?.owner_id && baseOwners.has(t.owner_id)) ownedAdjacent.push(id);
+    if (t?.owner_id && baseOwners.has(t.owner_id)) return true;
   }
-  if (ownedAdjacent.length === 0) return null;
-  if (ownedAdjacent.includes(homeId)) return homeId;
-  return ownedAdjacent[0];
+  return false;
+}
+
+/** 攻撃遠征の出発領地（本拠が隣なら本拠、そうでなければ隣接する前線基地など自領） */
+export function getAdjacentAttackSource(state: GameState, targetId: string): string | null {
+  const playerId = getLocalPlayerId();
+  const homeId = getPlayerHomeTerritoryId(state, playerId);
+  return getMarchFromTerritory(state, playerId, targetId, homeId);
 }
 
 /** ログイン中プレイヤーの本拠地（ホーム画面へ遷移するマス） */

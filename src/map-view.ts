@@ -5,27 +5,31 @@ import {
     Text,
     Assets,
     Texture,
+    Matrix,
     FederatedPointerEvent,
 } from "pixi.js";
 import type { GameState } from "./store";
 import { gameState, getLocalPlayerId, isPlayerIdentityResolved } from "./store";
 import {
-    GRID_COLS,
-    GRID_ROWS,
     formatTerritoryId,
     getPlayerHomeTerritoryId,
+    getWorldGridCols,
+    getWorldGridRows,
+    isAiOwnerId,
     isEnemyHomeTile,
+    isAiHomeTile,
     isPlayerHomeTile,
     isWithinWorldGrid,
     tryParseTerritoryId,
 } from "./game/territories";
+import { isRiverLevel, pickRiverAxis, type RiverAxis } from "./game/river-orientation";
 import {
     coordToScreen,
     diamondPoints,
     screenToCoord,
 } from "./map-isometric";
 import { formatTimeHHMMSS } from "./utils";
-export { GRID_COLS, GRID_ROWS, HOME_TERRITORY_ID, parseTerritoryId } from "./game/territories";
+export { getWorldGridCols as GRID_COLS, getWorldGridRows as GRID_ROWS, HOME_TERRITORY_ID, parseTerritoryId } from "./game/territories";
 
 // アイソメトリック: マスは◇型。45度回転して斜め上から見下ろす視点
 // タイルの幅・高さ（◇の横・縦の長さ）
@@ -34,7 +38,7 @@ const TILE_HEIGHT = 28;
 const TILE_DIMENSIONS = { width: TILE_WIDTH, height: TILE_HEIGHT } as const;
 
 // 地形テクスチャキャッシュ (level 1-6 に対応)
-const TERRAIN_TEXTURES: (Texture | null)[] = [null, null, null, null, null, null];
+const TERRAIN_TEXTURES: (Texture | null)[] = Array.from({ length: 10 }, () => null);
 // 本拠地用の城テクスチャ
 let CASTLE_TEXTURE: Texture | null = null;
 
@@ -150,12 +154,54 @@ export function focusMapOnPlayerHome(): void {
     requestHomeFocus(homeId);
 }
 
-const DRAW_ORDER: { col: number; row: number }[] = [];
-for (let sum = 0; sum < GRID_COLS + GRID_ROWS - 1; sum++) {
-    for (let row = 0; row < GRID_ROWS; row++) {
-        const col = sum - row;
-        if (col >= 0 && col < GRID_COLS) DRAW_ORDER.push({ col, row });
+let _drawOrder: { col: number; row: number }[] = [];
+let _drawOrderKey = "";
+
+function rebuildDrawOrder(cols: number, rows: number): void {
+    const key = `${cols}x${rows}`;
+    if (key === _drawOrderKey) return;
+    _drawOrderKey = key;
+    _drawOrder = [];
+    for (let sum = 0; sum < cols + rows - 1; sum++) {
+        for (let row = 0; row < rows; row++) {
+            const col = sum - row;
+            if (col >= 0 && col < cols) _drawOrder.push({ col, row });
+        }
     }
+}
+
+/** ビューポート内のタイルのみ描画（大マップ向けカリング） */
+function getVisibleTileRange(): { minCol: number; maxCol: number; minRow: number; maxRow: number } | null {
+    if (!_app || !_tileContainer) return null;
+    const cols = getWorldGridCols();
+    const rows = getWorldGridRows();
+    const { width, height } = getMapViewportSize();
+    if (width <= 0 || height <= 0) return null;
+
+    const margin = 3;
+    const corners = [
+        _tileContainer.toLocal({ x: 0, y: 0 }),
+        _tileContainer.toLocal({ x: width, y: 0 }),
+        _tileContainer.toLocal({ x: 0, y: height }),
+        _tileContainer.toLocal({ x: width, y: height }),
+    ];
+    let minCol = cols;
+    let maxCol = 0;
+    let minRow = rows;
+    let maxRow = 0;
+    for (const p of corners) {
+        const { col, row } = screenToCoord(p.x, p.y, TILE_DIMENSIONS);
+        minCol = Math.min(minCol, col - margin);
+        maxCol = Math.max(maxCol, col + margin);
+        minRow = Math.min(minRow, row - margin);
+        maxRow = Math.max(maxRow, row + margin);
+    }
+    return {
+        minCol: Math.max(0, minCol),
+        maxCol: Math.min(cols - 1, maxCol),
+        minRow: Math.max(0, minRow),
+        maxRow: Math.min(rows - 1, maxRow),
+    };
 }
 
 function terrainColor(level: number): number {
@@ -163,26 +209,32 @@ function terrainColor(level: number): number {
         case 1: return 0x5a6a38;
         case 2: return 0x8a7a48;
         case 3: return 0x2e5a28;
-        case 4: return 0x6a6a6a;
+        case 4: return 0x3a6a7a;
         case 5: return 0x8a8a9a;
-        case 6: return 0x3a6a7a;
+        case 6: return 0x6a6a6a;
+        case 7: return 0x4a3058;
+        case 8: return 0x5a2038;
+        case 9: return 0x2a1848;
         default: return 0x4a4838;
     }
 }
 
-// level 1-6 → 地形ファイル名（平原・丘陵・森・山地・山岳・川）
+// level 1-9 → 地形テクスチャ（Lv5山岳はレガシー互換）
 const TERRAIN_FILES: Record<number, string> = {
     1: "terrain-plains",
     2: "terrain-hills",
     3: "terrain-forest",
-    4: "terrain-mountain",
+    4: "terrain-river",
     5: "terrain-alpine",
-    6: "terrain-river",
+    6: "terrain-mountain",
+    7: "terrain-peril",
+    8: "terrain-demon",
+    9: "terrain-deep",
 };
 
 /** 地形テクスチャをプリロード（public/terrain/ の terrain-*.png） */
 async function loadTerrainTextures(): Promise<void> {
-    for (let level = 1; level <= 6; level++) {
+    for (let level = 1; level <= 9; level++) {
         const base = TERRAIN_FILES[level];
         for (const ext of [".png", ".svg"]) {
             try {
@@ -204,6 +256,68 @@ async function loadTerrainTextures(): Promise<void> {
     }
 }
 
+export interface TravelingDestinationOverlay {
+    overlayKey: string;
+    targetId: string;
+    /** 到着予定時刻（Unix ms）。ticker が残り時間を更新する */
+    arrivesAt: number;
+    secLeft: number;
+    unitNames: string[];
+    /** 攻撃・探索行軍時: 点線の起点（本拠地） */
+    lineFromId?: string;
+    ownerId?: string;
+    /** マーカー色（旗・探索アイコン） */
+    flagColor?: number;
+    lineColor?: number;
+    /** 攻撃=旗、探索=コンパス */
+    marchKind?: "attack" | "explore";
+}
+
+let _mapContainer: HTMLDivElement | null = null;
+
+/** マップコンテナがレイアウトされてサイズを持つまで待つ */
+export function waitForMapContainerLayout(container: HTMLElement, timeoutMs = 5000): Promise<void> {
+    return new Promise((resolve) => {
+        const started = performance.now();
+        const tick = () => {
+            if (container.clientWidth > 0 && container.clientHeight > 0) {
+                resolve();
+                return;
+            }
+            if (performance.now() - started > timeoutMs) {
+                resolve();
+                return;
+            }
+            requestAnimationFrame(tick);
+        };
+        tick();
+    });
+}
+
+/** display:none → block 直後にリサイズ＋再描画を促す（DevTools リサイズ相当） */
+export function notifyMapContainerShown(): void {
+    _needsFocusOnOpen = true;
+    _prevTerritoryJSON = "";
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            if (_mapContainer) syncMapRendererSize(_mapContainer);
+            if (_visible && _app) tryApplyHomeFocus();
+        });
+    });
+}
+
+export function wakeMapView(
+    state: GameState,
+    travelingDestinations?: TravelingDestinationOverlay[],
+): void {
+    if (_mapContainer) syncMapRendererSize(_mapContainer);
+    _needsFocusOnOpen = true;
+    _prevTerritoryJSON = "";
+    _visible = true;
+    updateMapView(state, travelingDestinations);
+    tryApplyHomeFocus();
+}
+
 export function isMapViewReady(): boolean {
     return _app != null;
 }
@@ -215,9 +329,13 @@ export async function initMapView(
     }
 ) {
     if (_app) return;
+    _mapContainer = container;
+    await waitForMapContainerLayout(container);
 
+    const initW = Math.max(container.clientWidth, 1);
+    const initH = Math.max(container.clientHeight, 1);
     const app = new Application();
-    await app.init({ resizeTo: container, backgroundColor: 0x0a0a0f });
+    await app.init({ backgroundColor: 0x0a0a0f, width: initW, height: initH });
     // @ts-ignore
     container.appendChild(app.canvas || app.view);
 
@@ -245,6 +363,7 @@ export async function initMapView(
     app.stage.addChild(_tileContainer);
 
     const resizeObserver = new ResizeObserver(() => {
+        syncMapRendererSize(container);
         if (_needsFocusOnOpen) tryApplyHomeFocus();
     });
     resizeObserver.observe(container);
@@ -294,6 +413,7 @@ export async function initMapView(
     });
 
     const onUp = (e: FederatedPointerEvent) => {
+        const wasDragging = dragging;
         if (!dragging) return;
         dragging = false;
 
@@ -307,21 +427,42 @@ export async function initMapView(
                 const t = _lastTerritoryMap.get(id);
                 _onTerritoryClick?.(id, t, e.global.x, e.global.y);
             }
+        } else if (wasDragging && dist >= 5) {
+            redrawTerrain();
+            redrawOverlay();
         }
     };
 
     app.stage.on("pointerup", onUp);
     app.stage.on("pointerupoutside", onUp);
+
+    ensureOverlayTicker();
+    syncMapRendererSize(container);
+}
+
+function syncMapRendererSize(container: HTMLElement): void {
+    if (!_app) return;
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    if (w > 0 && h > 0) {
+        _app.renderer.resize(w, h);
+        _app.stage.hitArea = _app.screen;
+    }
 }
 
 export function setMapVisible(v: boolean) {
-    if (v && !_visible) _needsFocusOnOpen = true;
+    const wasVisible = _visible;
+    if (v && !wasVisible) _needsFocusOnOpen = true;
     _visible = v;
+    if (v && !wasVisible && _app) {
+        const parent = (_app.canvas as HTMLCanvasElement | undefined)?.parentElement;
+        if (parent) syncMapRendererSize(parent);
+    }
 }
 
 export function updateMapView(
     state: GameState,
-    travelingDestinations?: { targetId: string; secLeft: number; unitNames: string[] }[]
+    travelingDestinations?: TravelingDestinationOverlay[],
 ) {
     if (!_app || !_tileContainer || !_terrainGraphics || !_borderGraphics || !_overlayContainer) return;
     if (!_visible) return;
@@ -338,7 +479,7 @@ export function updateMapView(
         && state.territories.length > 0
         && state.players[playerId]
     ) {
-        requestHomeFocus(_localHomeTerritoryId);
+        _homeFocusTargetId = _localHomeTerritoryId;
     }
 
     const territoryJSON = JSON.stringify(state.territories);
@@ -396,6 +537,42 @@ function strokeTerritoryBorder(
     }
 }
 
+function territoryLevelAt(col: number, row: number): number | undefined {
+    if (!isWithinWorldGrid(col, row)) return undefined;
+    return _lastTerritoryMap.get(formatTerritoryId(col, row))?.level;
+}
+
+/** 標高データは持たないが、◇タイル上で光沢・陰影を足して立体感を出す */
+function applyTerrainReliefShading(g: Graphics, points: number[], cx: number, cy: number) {
+    const px = (i: number) => points[i * 2];
+    const py = (i: number) => points[i * 2 + 1];
+    g.poly([px(0), py(0), px(1), py(1), cx, cy, px(3), py(3)], true)
+        .fill({ color: 0xffffff, alpha: 0.08 });
+    g.poly([px(3), py(3), cx, cy, px(1), py(1), px(2), py(2)], true)
+        .fill({ color: 0x000000, alpha: 0.16 });
+}
+
+/** 川タイルはグリッド軸に応じてテクスチャを90度回転（row軸=既定 / col軸=回転） */
+function fillTerrainDiamond(
+    g: Graphics,
+    points: number[],
+    cx: number,
+    cy: number,
+    texture: Texture,
+    riverAxis: RiverAxis | null,
+) {
+    if (riverAxis === "col") {
+        const matrix = new Matrix();
+        matrix.translate(cx, cy);
+        matrix.rotate(Math.PI / 2);
+        matrix.translate(-cx, -cy);
+        g.poly(points, true).fill({ texture, matrix, textureSpace: "local" });
+    } else {
+        g.poly(points, true).fill({ texture, textureSpace: "local" });
+    }
+    applyTerrainReliefShading(g, points, cx, cy);
+}
+
 function redrawTerrain() {
     const g = _terrainGraphics!;
     const borders = _borderGraphics!;
@@ -405,6 +582,11 @@ function redrawTerrain() {
 
     while (container.children.length > 0) container.removeChildAt(0);
 
+    const cols = getWorldGridCols();
+    const rows = getWorldGridRows();
+    rebuildDrawOrder(cols, rows);
+    const visible = getVisibleTileRange();
+
     const playerId = getLocalPlayerId();
     const tileDrawData: {
         points: number[];
@@ -413,7 +595,12 @@ function redrawTerrain() {
         level: number;
     }[] = [];
 
-    for (const { col, row } of DRAW_ORDER) {
+    for (const { col, row } of _drawOrder) {
+        if (visible) {
+            if (col < visible.minCol || col > visible.maxCol || row < visible.minRow || row > visible.maxRow) {
+                continue;
+            }
+        }
         const id = formatTerritoryId(col, row);
         const t = _lastTerritoryMap.get(id);
         const level = t?.level ?? 1;
@@ -438,19 +625,30 @@ function redrawTerrain() {
 
         const isOwnHome = isPlayerHomeTile(id, t, playerId, _localHomeTerritoryId);
         const isEnemyHome = isEnemyHomeTile(id, t, playerId, gameState);
-        const useCastleIcon = isOwnHome || isEnemyHome;
+        const isAiHome = isAiHomeTile(id, t, gameState);
+        const useCastleIcon = isOwnHome || isEnemyHome || isAiHome;
         let color = 0x4a4838;
         if (t) {
             if (t.owner_id === playerId) color = 0x2a3a5a;
+            else if (t.owner_id && isAiOwnerId(t.owner_id)) {
+                const aiIndex = gameState.ai_factions?.findIndex((f) => `ai_${f.faction_id}` === t.owner_id) ?? 0;
+                const faction = gameState.ai_factions?.[aiIndex];
+                color = faction?.color ?? 0x4a3a2a;
+            }
             else if (t.owner_id && t.owner_id !== "barbarian") color = 0x5a2a30;
             else color = terrainColor(level);
         }
 
         const tex = useCastleIcon ? CASTLE_TEXTURE : TERRAIN_TEXTURES[level];
         if (tex) {
-            g.poly(points, true).fill({ texture: tex, textureSpace: "local" });
+            const riverAxis =
+                isRiverLevel(level) && !useCastleIcon
+                    ? pickRiverAxis(col, row, territoryLevelAt)
+                    : null;
+            fillTerrainDiamond(g, points, cx, cy, tex, riverAxis);
         } else {
             g.poly(points, true).fill(color);
+            applyTerrainReliefShading(g, points, cx, cy);
         }
     }
 
@@ -461,57 +659,234 @@ function redrawTerrain() {
     }
 }
 
-const _travelPool: { bg: Graphics; text: Text }[] = [];
-let _travelContainer: Container | null = null;
+const ATTACK_FLAG_POLE_H = 14;
 
-function redrawOverlay(
-    travelingDestinations?: { targetId: string; secLeft: number; unitNames: string[] }[]
+function drawAttackFlag(g: Graphics, flagX: number, cy: number, fill: number) {
+    const stroke = ((fill >> 1) & 0x7f7f7f);
+    g.moveTo(flagX, cy).lineTo(flagX, cy - ATTACK_FLAG_POLE_H).stroke({ width: 2.5, color: 0x5d4037 });
+    g.moveTo(flagX, cy - ATTACK_FLAG_POLE_H)
+        .lineTo(flagX + 9, cy - ATTACK_FLAG_POLE_H - 4)
+        .lineTo(flagX, cy - ATTACK_FLAG_POLE_H + 3)
+        .closePath()
+        .fill(fill)
+        .stroke({ width: 1, color: stroke });
+}
+
+/** 探索遠征用マーカー（コンパス） */
+function drawExploreMarker(g: Graphics, cx: number, cy: number, fill: number) {
+    const iy = cy - 10;
+    const r = 8;
+    const rim = ((fill >> 1) & 0x7f7f7f) | 0x303030;
+    g.circle(cx, iy, r)
+        .fill({ color: 0x142028, alpha: 0.9 })
+        .stroke({ width: 2, color: fill });
+    g.moveTo(cx, iy).lineTo(cx + 4, iy - 5).stroke({ width: 2, color: fill, cap: "round" });
+    g.moveTo(cx, iy).lineTo(cx - 3, iy + 4).stroke({ width: 2, color: 0x9ca3af, cap: "round" });
+    g.circle(cx, iy, 2).fill(fill).stroke({ width: 0.5, color: rim });
+}
+
+type TravelPoolEntry = {
+    bg: Graphics;
+    text: Text;
+    flagX: number;
+    cy: number;
+    arrivesAt: number;
+    active: boolean;
+};
+
+const _travelPool: TravelPoolEntry[] = [];
+let _travelContainer: Container | null = null;
+let _attackLineGraphics: Graphics | null = null;
+let _lastTravelingDestinations: TravelingDestinationOverlay[] | undefined;
+let _attackLines: { fromId: string; toId: string; color: number; arrivesAt: number }[] = [];
+let _overlayTickerAdded = false;
+let _activeTravelPoolCount = 0;
+let _lastFlagTimerSec = -1;
+
+function attackLineBlinkAlpha(): number {
+    return 0.2 + 0.22 * (0.5 + 0.5 * Math.sin(Date.now() * 0.007));
+}
+
+function strokeDottedLine(
+    g: Graphics,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    opts: { dash: number; gap: number; width: number; color: number; alpha: number },
 ) {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) return;
+    const ux = dx / len;
+    const uy = dy / len;
+    const step = opts.dash + opts.gap;
+    for (let pos = 0; pos < len; pos += step) {
+        const end = Math.min(pos + opts.dash, len);
+        g.moveTo(x0 + ux * pos, y0 + uy * pos)
+            .lineTo(x0 + ux * end, y0 + uy * end)
+            .stroke({ width: opts.width, color: opts.color, alpha: opts.alpha, cap: "round" });
+    }
+}
+
+function drawAttackLines(alpha: number) {
+    if (!_travelContainer) return;
+    if (!_attackLineGraphics) {
+        _attackLineGraphics = new Graphics();
+        _travelContainer.addChildAt(_attackLineGraphics, 0);
+    }
+    const g = _attackLineGraphics;
+    g.clear();
+    if (_attackLines.length === 0) {
+        g.visible = false;
+        return;
+    }
+    g.visible = true;
+    for (const { fromId, toId, color } of _attackLines) {
+        const from = tryParseTerritoryId(fromId);
+        const to = tryParseTerritoryId(toId);
+        if (!from || !to) continue;
+        const fromScreen = coordToScreen(from.col, from.row, TILE_DIMENSIONS);
+        const toScreen = coordToScreen(to.col, to.row, TILE_DIMENSIONS);
+        strokeDottedLine(
+            g,
+            fromScreen.x,
+            fromScreen.y,
+            toScreen.x,
+            toScreen.y,
+            { dash: 4, gap: 5, width: 1.5, color, alpha },
+        );
+    }
+}
+
+function syncAttackLines(destinations: TravelingDestinationOverlay[] | undefined) {
+    _attackLines = [];
+    if (destinations) {
+        for (const d of destinations) {
+            if (!d.lineFromId) continue;
+            _attackLines.push({
+                fromId: d.lineFromId,
+                toId: d.targetId,
+                color: d.lineColor ?? 0xff8888,
+                arrivesAt: d.arrivesAt,
+            });
+        }
+    }
+    drawAttackLines(attackLineBlinkAlpha());
+}
+
+function updateMarchOverlayAnimation() {
+    if (!_visible) return;
+
+    const now = Date.now();
+    _attackLines = _attackLines.filter((line) => line.arrivesAt > now);
+
+    if (_attackLines.length > 0) {
+        drawAttackLines(attackLineBlinkAlpha());
+    } else if (_attackLineGraphics) {
+        _attackLineGraphics.clear();
+        _attackLineGraphics.visible = false;
+    }
+
+    if (_activeTravelPoolCount === 0) return;
+    const sec = Math.floor(now / 1000);
+    if (sec === _lastFlagTimerSec) return;
+    _lastFlagTimerSec = sec;
+
+    for (let i = 0; i < _activeTravelPoolCount; i++) {
+        const entry = _travelPool[i];
+        if (!entry.active) continue;
+        const secLeft = (entry.arrivesAt - now) / 1000;
+        if (secLeft <= 0) {
+            entry.active = false;
+            entry.bg.visible = false;
+            entry.text.visible = false;
+            continue;
+        }
+        entry.text.text = formatTimeHHMMSS(secLeft);
+    }
+}
+
+function ensureOverlayTicker() {
+    if (!_app || _overlayTickerAdded) return;
+    _overlayTickerAdded = true;
+    _app.ticker.add(() => {
+        updateMarchOverlayAnimation();
+    });
+}
+
+function redrawOverlay(travelingDestinations?: TravelingDestinationOverlay[]) {
     if (!_tileContainer) return;
+
+    if (travelingDestinations !== undefined) {
+        _lastTravelingDestinations = travelingDestinations;
+    }
+    const destinations = travelingDestinations ?? _lastTravelingDestinations;
 
     if (!_travelContainer) {
         _travelContainer = new Container();
         _tileContainer.addChild(_travelContainer);
+        ensureOverlayTicker();
     }
 
-    const travelMap = new Map<string, { secLeft: number; unitNames: string[] }>();
-    if (travelingDestinations) {
-        for (const d of travelingDestinations) travelMap.set(d.targetId, d);
+    syncAttackLines(destinations);
+
+    const overlays = destinations ?? [];
+    const targetGroups = new Map<string, TravelingDestinationOverlay[]>();
+    for (const d of overlays) {
+        const group = targetGroups.get(d.targetId) ?? [];
+        group.push(d);
+        targetGroups.set(d.targetId, group);
     }
 
     let poolIdx = 0;
 
-    for (const [_id, travel] of travelMap) {
-        const parsed = tryParseTerritoryId(_id);
+    for (const travel of overlays) {
+        if (travel.secLeft <= 0) continue;
+        const parsed = tryParseTerritoryId(travel.targetId);
         if (!parsed) continue;
         const { col, row } = parsed;
 
+        const group = targetGroups.get(travel.targetId) ?? [travel];
+        const groupIndex = group.indexOf(travel);
+        const offsetX = (groupIndex - (group.length - 1) / 2) * 12;
+
         const { x: cx, y: cy } = coordToScreen(col, row, TILE_DIMENSIONS);
+        const flagX = cx + offsetX;
 
         let entry = _travelPool[poolIdx];
         if (!entry) {
             const bg = new Graphics();
             const text = new Text({ text: "", style: { fontSize: 11, fill: 0xffffff, fontWeight: "bold" } });
             text.anchor.set(0.5);
-            entry = { bg, text };
+            entry = { bg, text, flagX: 0, cy: 0, arrivesAt: 0, active: false };
             _travelPool.push(entry);
             _travelContainer.addChild(bg);
             _travelContainer.addChild(text);
         }
 
-        const timeStr = formatTimeHHMMSS(travel.secLeft);
-        entry.text.text = timeStr;
-        entry.text.x = cx;
+        entry.flagX = flagX;
+        entry.cy = cy;
+        entry.arrivesAt = travel.arrivesAt;
+        entry.active = true;
+
+        entry.text.text = formatTimeHHMMSS(Math.max(0, travel.secLeft));
+        entry.text.x = flagX;
         entry.text.y = cy + 6;
 
+        const markerFill = travel.flagColor ?? 0xff4444;
+
         entry.bg.clear();
-        const poleH = 14;
-        entry.bg.moveTo(cx, cy).lineTo(cx, cy - poleH).stroke({ width: 2.5, color: 0x5d4037 });
-        entry.bg.moveTo(cx, cy - poleH).lineTo(cx + 9, cy - poleH - 4).lineTo(cx, cy - poleH + 3).closePath().fill(0xff4444).stroke({ width: 1, color: 0xcc2222 });
+        if (travel.marchKind === "explore") {
+            drawExploreMarker(entry.bg, flagX, cy, markerFill);
+        } else {
+            drawAttackFlag(entry.bg, flagX, cy, markerFill);
+        }
 
         const pad = 2;
         entry.bg.roundRect(
-            cx - entry.text.width / 2 - pad,
+            flagX - entry.text.width / 2 - pad,
             cy + 6 - entry.text.height / 2 - pad,
             entry.text.width + pad * 2,
             entry.text.height + pad * 2, 2
@@ -522,7 +897,11 @@ function redrawOverlay(
         poolIdx++;
     }
 
+    _activeTravelPoolCount = poolIdx;
+    _lastFlagTimerSec = -1;
+
     for (let i = poolIdx; i < _travelPool.length; i++) {
+        _travelPool[i].active = false;
         _travelPool[i].bg.visible = false;
         _travelPool[i].text.visible = false;
     }

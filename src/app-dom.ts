@@ -1,4 +1,5 @@
 import { createHudElement } from "./ui/hud";
+import { createHudSettingsElement } from "./ui/hud-settings";
 import { createLogElement } from "./ui/log-panel";
 import { createMenuElement } from "./ui/context-menu";
 import { createUnitSelectElement } from "./ui/unit-select";
@@ -11,10 +12,12 @@ import { createAllianceElement } from "./ui/alliance-screen";
 import { createPackElement } from "./ui/pack-screen";
 import { createStatusElement } from "./ui/status-screen";
 import { createRankingElement } from "./ui/ranking-screen";
+import { createGameNoticeElement } from "./ui/game-notice";
 
 export interface AppElements {
   mapContainer: HTMLDivElement;
   hudEl: HTMLDivElement;
+  hudSettingsEl: HTMLDivElement;
   logEl: HTMLDivElement;
   menuEl: HTMLDivElement;
   unitSelectEl: HTMLDivElement;
@@ -36,6 +39,7 @@ export function createAppElements(appEl: HTMLDivElement): AppElements {
   const elements: AppElements = {
     mapContainer,
     hudEl: createHudElement(),
+    hudSettingsEl: createHudSettingsElement(),
     logEl: createLogElement(),
     menuEl: createMenuElement(),
     unitSelectEl: createUnitSelectElement(),
@@ -52,6 +56,8 @@ export function createAppElements(appEl: HTMLDivElement): AppElements {
 
   appEl.appendChild(elements.mapContainer);
   appEl.appendChild(elements.hudEl);
+  appEl.appendChild(elements.hudSettingsEl);
+  appEl.appendChild(createGameNoticeElement());
   appEl.appendChild(elements.logEl);
   appEl.appendChild(elements.menuEl);
   appEl.appendChild(elements.unitSelectEl);

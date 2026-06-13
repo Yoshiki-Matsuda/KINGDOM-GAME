@@ -1,20 +1,25 @@
 use super::*;
 
-pub(super) fn apply_end_turn_action(state: &GameState, log: &mut Vec<String>) -> GameState {
-    push_log(log, format!("--- ターン {} 終了 ---", state.turn));
-    let mut players = state.players.clone();
-    for player in players.values_mut() {
-        let fac_b = crate::facilities::calculate_facility_bonuses(&player.facilities);
-        let bonus = 5_u32.saturating_add(fac_b.stamina_recovery_bonus);
-        let max_stamina = 120_u32;
-        while player.card_stamina.len() < player.owned_cards.len() {
-            player.card_stamina.push(max_stamina);
-        }
-        for st in player.card_stamina.iter_mut() {
-            *st = (*st).saturating_add(bonus).min(max_stamina);
-        }
+fn apply_battle_loot_drops(
+    actor_player_id: &str,
+    working_players: &mut std::collections::HashMap<String, crate::model::PlayerData>,
+    inventory: &mut Vec<crate::items::InventoryItem>,
+    drops: Vec<crate::items::InventoryItem>,
+    log: &mut Vec<String>,
+) {
+    if drops.is_empty() {
+        return;
     }
-    build_game_state(state, state.turn + 1, state.territories.clone(), log.clone(), players)
+    push_actor_log(log, actor_player_id, "--- 戦利品 ---".to_string());
+    let Some(gold) = working_players
+        .get_mut(actor_player_id)
+        .map(|p| &mut p.resources.gold)
+    else {
+        return;
+    };
+    for line in crate::items::apply_item_rewards(inventory, gold, drops) {
+        push_actor_log(log, actor_player_id, line);
+    }
 }
 
 pub(super) fn apply_deploy_action(
@@ -78,10 +83,10 @@ pub(super) fn apply_deploy_action(
     let total_monster_count: u32 = reinforcement_monster_counts.iter().sum();
     push_log(
         log,
-        format!("ターン{}: {}に魔獣数{}（合計{}）を増援した。", state.turn, name, count, total_monster_count),
+        format!("{}に魔獣数{}（合計{}）を増援した。", name, count, total_monster_count),
     );
 
-    build_game_state(state, state.turn, territories, log.clone(), state.players.clone())
+    build_game_state(state, territories, log.clone(), state.players.clone())
 }
 
 fn assign_positions(chars: &mut [CombatCharacter]) {
@@ -98,19 +103,40 @@ fn assign_positions(chars: &mut [CombatCharacter]) {
     }
 }
 
-/// ローカル開発用: 攻撃側を敵最強体の10倍相当まで引き上げ（プレイヤー上限9999は適用しない）
-fn apply_dev_auto_win_boost(our_chars: &mut [CombatCharacter], enemy_chars: &[CombatCharacter]) {
-    let max_enemy = enemy_chars
-        .iter()
-        .map(|c| c.current_monster_count.max(c.base_monster_count as f32))
-        .fold(0.0f32, f32::max)
-        .max(1.0);
-    let target_mc = (max_enemy * 10.0).min(999_999.0);
+fn position_label(position: crate::skills::Position) -> &'static str {
+    match position {
+        crate::skills::Position::Front => "FRONT",
+        crate::skills::Position::Back => "BACK",
+        crate::skills::Position::Leader => "LEADER",
+    }
+}
+
+fn push_enemy_roster_log(log: &mut Vec<String>, enemy_chars: &[CombatCharacter]) {
+    push_log(log, "--- 敵編成 ---".to_string());
+    for ch in enemy_chars {
+        push_log(
+            log,
+            format!(
+                "[敵] {}（{}）魔獣数{:.0} ATK{} DEF{} INT{} MDF{} SPD{:.0}",
+                ch.name,
+                position_label(ch.position),
+                ch.current_monster_count,
+                ch.attack,
+                ch.defense,
+                ch.intelligence,
+                ch.magic_defense,
+                ch.current_speed,
+            ),
+        );
+    }
+}
+
+/// ローカル開発用: 攻撃側のダメージ倍率のみ引き上げ（魔獣数は所持値のまま・上限9999準拠）
+fn apply_dev_auto_win_boost(our_chars: &mut [CombatCharacter], _enemy_chars: &[CombatCharacter]) {
     for character in our_chars.iter_mut() {
         if !character.is_alive {
             continue;
         }
-        character.current_monster_count = character.current_monster_count.max(target_mc);
         character.damage_multiplier *= 10.0;
     }
 }
@@ -543,31 +569,36 @@ fn apply_on_attack_skill_followup_one_team(
     }
 }
 
-fn compute_net_attack_damage(
+fn compute_physical_attack_damage(
+    attacker: &CombatCharacter,
+    defender: &CombatCharacter,
+) -> f32 {
+    let atk_stat = attacker.attack as f32 * attacker.attack_buff_multiplier();
+    let def_stat = defender.defense as f32
+        * (1.0 - defender.damage_reduction)
+        * defender.defense_buff_multiplier();
+    let mc = attacker.current_monster_count;
+    let ratio = (atk_stat / def_stat.max(1.0)).clamp(0.3, 1.1);
+    ratio * mc * attacker.damage_multiplier * attacker.outgoing_damage_multiplier()
+}
+
+fn compute_skill_attack_damage(
     attacker: &CombatCharacter,
     defender: &CombatCharacter,
     attack_mods: &crate::skills::AttackModifiers,
     log: &mut Vec<String>,
 ) -> f32 {
-    let atk_stat = attacker.attack.max(attacker.intelligence) as f32 * attacker.attack_buff_multiplier();
-    let use_magic = attacker.intelligence > attacker.attack;
+    let int_stat = attacker.intelligence as f32 * attacker.attack_buff_multiplier();
     let def_stat = if attack_mods.ignore_defense {
         0.0
-    } else if use_magic {
-        defender.magic_defense as f32
-            * (1.0 - defender.damage_reduction)
-            * defender.defense_buff_multiplier()
     } else {
-        defender.defense as f32
+        defender.magic_defense as f32
             * (1.0 - defender.damage_reduction)
             * defender.defense_buff_multiplier()
     };
     let mc = attacker.current_monster_count;
-    let ratio = (atk_stat / def_stat.max(1.0)).clamp(0.3, 1.1);
-    let mut raw_damage = ratio
-        * mc
-        * attacker.damage_multiplier
-        * attacker.outgoing_damage_multiplier();
+    let ratio = (int_stat / def_stat.max(1.0)).clamp(0.3, 1.1);
+    let mut raw_damage = ratio * mc * attacker.outgoing_damage_multiplier();
     raw_damage = raw_damage * attack_mods.damage_multiplier + attack_mods.damage_add;
     raw_damage += attack_mods.true_damage;
 
@@ -576,12 +607,26 @@ fn compute_net_attack_damage(
         raw_damage += percent_dmg;
         push_log(log, format!("+{:.0} 割合ダメージ", percent_dmg));
     }
+    raw_damage
+}
+
+fn compute_net_attack_damage(
+    attacker: &CombatCharacter,
+    defender: &CombatCharacter,
+    attack_mods: &crate::skills::AttackModifiers,
+    log: &mut Vec<String>,
+) -> f32 {
+    let mut raw_damage = compute_physical_attack_damage(attacker, defender);
+    if attack_mods_has_skill_damage(attack_mods) {
+        raw_damage += compute_skill_attack_damage(attacker, defender, attack_mods, log);
+    }
 
     let vulnerability = defender.get_vulnerability();
     let mark_damage = defender.get_mark_damage();
     raw_damage = raw_damage * (1.0 + vulnerability) + mark_damage;
     raw_damage *= race_matchup_damage_multiplier(attacker.race, defender.race);
 
+    let mc = attacker.current_monster_count;
     let min_dmg = kc_minimum_damage(mc);
     let max_dmg = mc * 1.1;
     let (low, high) = if min_dmg <= max_dmg {
@@ -593,7 +638,6 @@ fn compute_net_attack_damage(
 }
 
 /// 占領成功時、出撃した魔獣スロットへ経験値を付与しレベルアップ処理を行う
-/// （KC仕様: スタミナ50未満はXPなし、満タン出撃はボーナス）
 fn award_conquest_xp(
     player: &mut crate::model::PlayerData,
     idxs: &[usize],
@@ -614,24 +658,7 @@ fn award_conquest_xp(
         if i >= player.card_exp.len() {
             continue;
         }
-        // KC仕様: スタミナ200以下ではXPなし、MAX出撃(120=満タン)ならボーナス
-        let stam_before = player
-            .card_stamina
-            .get(i)
-            .copied()
-            .unwrap_or(120)
-            .saturating_add(crate::model_actions::STAMINA_ATTACK_FOR_XP);
-        let xp_gain = if stam_before < 50 {
-            0
-        } else if stam_before >= 120 {
-            base_xp.saturating_mul(6) / 5
-        } else {
-            base_xp
-        };
-        if xp_gain == 0 {
-            continue;
-        }
-        player.card_exp[i] = player.card_exp[i].saturating_add(xp_gain);
+        player.card_exp[i] = player.card_exp[i].saturating_add(base_xp);
         let name = crate::cards::get_card(player.owned_cards[i])
             .map(|c| c.name.to_string())
             .unwrap_or_else(|| format!("魔獣#{}", player.owned_cards[i]));
@@ -686,11 +713,18 @@ fn build_attacker_chars(
         .enumerate()
         .map(|(index, name)| {
             let stats = our_stats.get(index).cloned().unwrap_or_default();
-            let base_monster_count = if stats.monster_count > 0 {
-                stats.monster_count
-            } else {
-                *our_body_monster_counts.get(index).unwrap_or(&1)
-            };
+            let base_monster_count = our_body_monster_counts
+                .get(index)
+                .copied()
+                .filter(|&c| c > 0)
+                .or_else(|| {
+                    if stats.monster_count > 0 {
+                        Some(stats.monster_count)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(1);
             let base_speed = if stats.speed > 0 { stats.speed } else { *our_speeds.get(index).unwrap_or(&5) };
             let attack = if stats.attack > 0 { stats.attack } else { 5 };
             let intelligence = if stats.intelligence > 0 { stats.intelligence } else { 5 };
@@ -711,7 +745,8 @@ fn build_attacker_chars(
             let defense = mul(defense);
             let magic_defense = mul(magic_defense);
             let boosted_speed = mul(boosted_speed);
-            let boosted_monster_count = mul(boosted_monster_count);
+            let boosted_monster_count = mul(boosted_monster_count)
+                .min(crate::model::MAX_MONSTER_COUNT_PER_CARD_SLOT);
 
             let mut ch = CombatCharacter::with_stats(
                 index,
@@ -817,6 +852,20 @@ fn resolve_attack_outcome(
         teams[target_team][target_idx].current_monster_count -= damage_after_shield;
     }
 
+    if attack_mods.absorb_rate > 0.0 && damage_after_shield > 0.0 {
+        let before = teams[0][actor_idx].current_monster_count;
+        let absorb = damage_after_shield * attack_mods.absorb_rate;
+        teams[0][actor_idx].current_monster_count += absorb;
+        let after = teams[0][actor_idx].current_monster_count;
+        push_log(
+            log,
+            format!(
+                "{}が {:.0} 魔獣数を吸収！（{:.0} → {:.0}）",
+                atk_name, absorb, before, after
+            ),
+        );
+    }
+
     if teams[target_team][target_idx].current_monster_count <= 0.0 {
         teams[target_team][target_idx].is_alive = false;
         let death_logged =
@@ -832,11 +881,6 @@ fn resolve_attack_outcome(
         if attack_mods.monster_steal > 0.0 {
             teams[0][actor_idx].current_monster_count += attack_mods.monster_steal;
             push_log(log, format!("{}が {:.0} 魔獣数を奪取！", atk_name, attack_mods.monster_steal));
-        }
-        if attack_mods.absorb_rate > 0.0 {
-            let absorb = damage_after_shield * attack_mods.absorb_rate;
-            teams[0][actor_idx].current_monster_count += absorb;
-            push_log(log, format!("{}が {:.0} 魔獣数を吸収！", atk_name, absorb));
         }
         if attack_mods.extra_attacks > 0 {
             teams[0][actor_idx].extra_attacks += attack_mods.extra_attacks;
@@ -864,13 +908,9 @@ fn resolve_attack_outcome(
             && rand::random::<f32>() < counter_rate
             && teams[0][actor_idx].is_alive
         {
-            let c_atk = teams[target_team][target_idx]
-                .attack
-                .max(teams[target_team][target_idx].intelligence) as f32
+            let c_atk = teams[target_team][target_idx].attack as f32
                 * teams[target_team][target_idx].attack_buff_multiplier();
-            let c_def = teams[0][actor_idx]
-                .defense
-                .max(teams[0][actor_idx].magic_defense) as f32
+            let c_def = teams[0][actor_idx].defense as f32
                 * teams[0][actor_idx].defense_buff_multiplier();
             let c_mc = teams[target_team][target_idx].current_monster_count;
             let c_ratio = (c_atk / c_def.max(1.0)).clamp(0.3, 1.1);
@@ -1052,6 +1092,7 @@ pub(super) fn apply_attack_action(
     stats_per_body: &Option<Vec<CardStats>>,
     owned_card_indices: &Option<Vec<usize>>,
     dev_auto_win: bool,
+    skip_home_body_check: bool,
 ) -> GameState {
     let mut territories = state.territories.clone();
     let from_idx = match get_territory_index(&territories, from_territory_id) {
@@ -1063,6 +1104,8 @@ pub(super) fn apply_attack_action(
         None => return state.clone(),
     };
     let attack_target_neutral = territories[to_idx].owner_id.is_none();
+    let attack_own_territory = territories[to_idx].owner_id.as_deref() == Some(actor_player_id);
+    let use_neutral_combat = attack_target_neutral || attack_own_territory;
     let home_id = home_territory_id();
     if get_territory_index(&territories, &home_id).is_none() {
         return state.clone();
@@ -1080,26 +1123,25 @@ pub(super) fn apply_attack_action(
     }
     // 本拠編成（owned_card_indices）の遠征: from は隣接ルート用のみ。編成体数は本拠で判定する
     let expedition_from_home = owned_card_indices.is_some();
-    if expedition_from_home {
+    if expedition_from_home && !skip_home_body_check {
         let Some(player) = state.players.get(actor_player_id) else {
             return state.clone();
         };
-        let home_id = player.home_territory_id.as_str();
-        let Some(home_idx) = get_territory_index(&territories, home_id) else {
-            push_log(log, "本拠地が見つかりません。".to_string());
-            return state.clone();
-        };
-        if count == 0 || territories[home_idx].troops < count {
+        let away = super::march::march_bodies_away_count(player, default_now_ms());
+        let cap = player.owned_cards.len() as u32;
+        let available = cap.saturating_sub(away);
+        if count == 0 || count > available {
+            let home_id = player.home_territory_id.as_str();
             push_log(
                 log,
                 format!(
-                    "本拠({})の編成体数が足りません（必要{}体, 現在{}体）。",
-                    home_id, count, territories[home_idx].troops
+                    "本拠({})の編成体数が足りません（必要{}体, 利用可能{}体）。",
+                    home_id, count, available
                 ),
             );
             return state.clone();
         }
-    } else if territories[from_idx].troops < count || count == 0 {
+    } else if !expedition_from_home && (territories[from_idx].troops < count || count == 0) {
         push_log(
             log,
             format!(
@@ -1119,14 +1161,42 @@ pub(super) fn apply_attack_action(
         return state.clone();
     }
 
-    let our_body_monster_counts: Vec<u32> = monsters_per_body
+    let march_monster_counts: Vec<u32> = monsters_per_body
         .clone()
         .filter(|values| values.len() == count as usize)
         .unwrap_or_else(|| vec![1u32; count as usize]);
+    let our_stats: Vec<CardStats> = if let (Some(oci), Some(player)) = (
+        owned_card_indices
+            .as_ref()
+            .filter(|indices| indices.len() == count as usize),
+        state.players.get(actor_player_id),
+    ) {
+        let mc: Vec<u32> = oci
+            .iter()
+            .enumerate()
+            .map(|(body_i, &slot)| {
+                march_monster_counts
+                    .get(body_i)
+                    .copied()
+                    .or_else(|| player.card_monster_counts.get(slot).copied())
+                    .unwrap_or(1)
+            })
+            .collect();
+        crate::model::resolve_authoritative_body_stats(player, oci, Some(&mc))
+    } else {
+        stats_per_body
+            .clone()
+            .filter(|values| values.len() == count as usize)
+            .unwrap_or_else(|| vec![CardStats::default(); count as usize])
+    };
+    let our_body_monster_counts: Vec<u32> = our_stats
+        .iter()
+        .map(|s| s.monster_count.max(1))
+        .collect();
     let our_speeds: Vec<u32> = speed_per_body
         .clone()
         .filter(|values| values.len() == count as usize)
-        .unwrap_or_else(|| vec![5u32; count as usize]);
+        .unwrap_or_else(|| our_stats.iter().map(|s| s.speed.max(1)).collect());
     let our_names: Vec<String> = our_body_names
         .clone()
         .filter(|values| values.len() == count as usize)
@@ -1135,10 +1205,6 @@ pub(super) fn apply_attack_action(
         .clone()
         .filter(|values| values.len() == count as usize)
         .unwrap_or_else(|| vec![SkillData::default(); count as usize]);
-    let our_stats: Vec<CardStats> = stats_per_body
-        .clone()
-        .filter(|values| values.len() == count as usize)
-        .unwrap_or_else(|| vec![CardStats::default(); count as usize]);
 
     let player_facilities = state
         .players
@@ -1185,21 +1251,11 @@ pub(super) fn apply_attack_action(
         return state.clone();
     }
 
-    // KC準拠: 攻撃1回でスタミナ消費
-    // （XP計算時は消費前の値と比較するため公開する）
-
     let mut working_players = state.players.clone();
 
     if let Some(ref oci) = owned_card_indices {
         if oci.len() != count as usize {
             return state.clone();
-        }
-        let mut seen_slots = HashSet::new();
-        for &i in oci {
-            if !seen_slots.insert(i) {
-                push_log(log, "同一体スロットを複数回指定できません。".to_string());
-                return state.clone();
-            }
         }
         let Some(player) = working_players.get(actor_player_id) else {
             return state.clone();
@@ -1210,29 +1266,19 @@ pub(super) fn apply_attack_action(
                 return state.clone();
             }
         }
+        let mut seen_slots = HashSet::new();
+        for &i in oci {
+            if !seen_slots.insert(i) {
+                push_log(log, "同一体スロットを複数回指定できません。".to_string());
+                return state.clone();
+            }
+        }
         let mut seen_card_ids = HashSet::new();
         for &i in oci {
             let card_id = player.owned_cards[i];
             if !seen_card_ids.insert(card_id) {
                 push_log(log, "同一種の魔獣を複数配置できません。".to_string());
                 return state.clone();
-            }
-        }
-        for &i in oci {
-            let st = player.card_stamina.get(i).copied().unwrap_or(120);
-            if st < STAMINA_ATTACK_FOR_XP {
-                push_log(log, "スタミナが足りない魔獣が含まれています。".to_string());
-                return state.clone();
-            }
-        }
-    }
-    if let Some(ref oci) = owned_card_indices {
-        if let Some(player) = working_players.get_mut(actor_player_id) {
-            while player.card_stamina.len() < player.owned_cards.len() {
-                player.card_stamina.push(120);
-            }
-            for &i in oci {
-                player.card_stamina[i] = player.card_stamina[i].saturating_sub(STAMINA_ATTACK_FOR_XP);
             }
         }
     }
@@ -1291,8 +1337,11 @@ pub(super) fn apply_attack_action(
     );
     assign_positions(&mut our_chars);
 
-    let (_defender_troops, enemy_monster_counts, enemy_names) =
-        resolve_territory_defenders(&territories[to_idx]);
+    let (_defender_troops, enemy_monster_counts, enemy_names) = if attack_own_territory {
+        generate_neutral_enemies_for_territory(territories[to_idx].level, &territories[to_idx].id)
+    } else {
+        resolve_territory_defenders(&territories[to_idx], &state.players)
+    };
 
     let mut enemy_chars: Vec<CombatCharacter> = enemy_names
         .iter()
@@ -1305,14 +1354,26 @@ pub(super) fn apply_attack_action(
     assign_positions(&mut enemy_chars);
 
     let attacker_label = attack_unit_name.as_deref().unwrap_or(from_name.as_str());
+    let defender_owner = territories[to_idx].owner_id.as_deref();
+    let defender_label = defender_owner
+        .and_then(|owner_id| {
+            state
+                .ai_factions
+                .iter()
+                .find(|f| format!("ai_{}", f.faction_id) == owner_id)
+                .map(|f| f.name.clone())
+        })
+        .or_else(|| defender_owner.map(|id| id.to_string()))
+        .unwrap_or_else(|| to_name.clone());
     let coords_str = parse_territory_coords(to_territory_id)
         .map(|(col, row)| format!("<{},{}>", col, row))
         .unwrap_or_default();
-    push_log(
+    push_actor_log(
         log,
+        actor_player_id,
         format!(
-            "[p:{actor_player_id}]【{}{}侵攻戦】{}が{}へ侵攻開始",
-            to_name, coords_str, attacker_label, to_name
+            "【{}{}侵攻戦】{}が{}（{}）へ侵攻開始",
+            to_name, coords_str, attacker_label, to_name, defender_label
         ),
     );
 
@@ -1338,10 +1399,18 @@ pub(super) fn apply_attack_action(
         }
         assign_positions(&mut enemy_chars);
         for c in our_chars.iter_mut() {
+            if !c.is_alive {
+                continue;
+            }
             c.status_effects.clear();
             c.damage_multiplier = 1.0;
             c.damage_reduction = 0.0;
             c.extra_attacks = 0;
+            if c.startup_monster_factor > 1.0 + f32::EPSILON {
+                c.current_monster_count /= c.startup_monster_factor;
+                c.startup_monster_factor = 1.0;
+            }
+            c.current_speed = c.pre_startup_speed;
         }
         push_log(log, format!("--- 第{}戦 ---", wave));
     }
@@ -1350,12 +1419,20 @@ pub(super) fn apply_attack_action(
         apply_dev_auto_win_boost(&mut our_chars, &enemy_chars);
     }
 
+    push_enemy_roster_log(log, &enemy_chars);
+
     push_log(log, "--- スタートアップフェーズ ---".to_string());
     if wave == 1 {
         apply_race_bonus(&mut our_chars, log);
         apply_race_lab_bonus(&mut our_chars, player_facilities, log);
         apply_shrine_bonus(&mut our_chars, &facility_bonuses, log);
         apply_race_bonus(&mut enemy_chars, log);
+    }
+    for c in our_chars.iter_mut().filter(|c| c.is_alive) {
+        c.pre_startup_speed = c.current_speed;
+    }
+    for c in enemy_chars.iter_mut().filter(|c| c.is_alive) {
+        c.pre_startup_speed = c.current_speed;
     }
     apply_battle_start_skills(&mut our_chars, &mut enemy_chars, log);
 
@@ -1448,7 +1525,7 @@ pub(super) fn apply_attack_action(
         && last_combat_turn >= max_combat_turns
         && !enemy_commander_dead
     {
-        push_log(log, "8ターン経過。防衛側の勝利。".to_string());
+        push_actor_log(log, actor_player_id, "8ターン経過。防衛側の勝利。".to_string());
         break 'waves;
     }
 
@@ -1462,7 +1539,7 @@ pub(super) fn apply_attack_action(
     let enemy_leader_defeated = enemy_chars
         .iter()
         .any(|c| c.position == crate::skills::Position::Leader && !c.is_alive);
-    let neutral_won_by_commander = attack_target_neutral
+    let neutral_won_by_commander = use_neutral_combat
         && !surviving_allies.is_empty()
         && enemy_leader_defeated;
     let wave_won_for_occ = waves_cleared || neutral_won_by_commander;
@@ -1472,7 +1549,7 @@ pub(super) fn apply_attack_action(
     if wave_won_for_occ {
         let occ: u32 = surviving_allies.iter().map(|c| c.occupation_power).sum();
         let max_d = territories[to_idx].max_durability;
-        if max_d == 0 {
+        if max_d == 0 || attack_own_territory {
             conquered = true;
         } else {
             territories[to_idx].durability = territories[to_idx].durability.saturating_sub(occ);
@@ -1480,8 +1557,9 @@ pub(super) fn apply_attack_action(
                 conquered = true;
             } else {
                 partial_occupation = true;
-                push_log(
+                push_actor_log(
                     log,
+                    actor_player_id,
                     format!(
                         "敵を撃破したが{}は耐久{}が残り、占領には至らなかった。",
                         to_name, territories[to_idx].durability
@@ -1503,7 +1581,26 @@ pub(super) fn apply_attack_action(
 
     let prev_owner_id = territories[to_idx].owner_id.clone();
     let was_base = territories[to_idx].is_base;
-    if conquered {
+    if conquered && attack_own_territory {
+        push_actor_log(
+            log,
+            actor_player_id,
+            format!("{}の演習戦に勝利した！", to_name),
+        );
+        let enemy_type_refs: Vec<&str> = enemy_names.iter().map(|name| name.as_str()).collect();
+        let drops = crate::items::calculate_drops(&enemy_type_refs, facility_bonuses.drop_rate);
+        apply_battle_loot_drops(actor_player_id, &mut working_players, &mut new_inventory, drops, log);
+        let dropped_cards = calculate_card_drops(&enemy_names, facility_bonuses.drop_rate as f32);
+        if !dropped_cards.is_empty() {
+            push_actor_log(log, actor_player_id, "--- 魔獣入手 ---".to_string());
+            for card_id in &dropped_cards {
+                if let Some(card) = crate::cards::get_card(*card_id) {
+                    push_actor_log(log, actor_player_id, format!("魔獣「{}」を入手！", card.name));
+                    new_owned_cards.push(*card_id);
+                }
+            }
+        }
+    } else if conquered {
         territories[to_idx].owner_id = Some(actor_player_id.to_string());
         territories[to_idx].max_durability = 0;
         territories[to_idx].durability = 0;
@@ -1526,26 +1623,36 @@ pub(super) fn apply_attack_action(
             territories[to_idx].body_monster_counts = Some(occupying);
             territories[to_idx].body_names = None;
         }
-        push_log(log, format!("{}を占領しました！", to_name));
+        push_actor_log(log, actor_player_id, format!("{}を占領しました！", to_name));
+
+        let level = territories[to_idx].level;
+        let (food, wood, stone, iron) = crate::model::conquest_resource_bonus(level);
+        if let Some(player) = working_players.get_mut(actor_player_id) {
+            player.resources.food = player.resources.food.saturating_add(food);
+            player.resources.wood = player.resources.wood.saturating_add(wood);
+            player.resources.stone = player.resources.stone.saturating_add(stone);
+            player.resources.iron = player.resources.iron.saturating_add(iron);
+            push_actor_log(
+                log,
+                actor_player_id,
+                format!(
+                    "占領報酬: 食料+{}・木+{}・石+{}・鉄+{}",
+                    food, wood, stone, iron
+                ),
+            );
+        }
 
         let is_ruin = territories[to_idx].ruin.is_some();
         let enemy_type_refs: Vec<&str> = enemy_names.iter().map(|name| name.as_str()).collect();
         let drops = crate::items::calculate_drops(&enemy_type_refs, facility_bonuses.drop_rate);
-
-        if !drops.is_empty() {
-            push_log(log, "--- 戦利品 ---".to_string());
-            for drop in &drops {
-                push_log(log, format!("{}x{} を入手！", drop.item_id, drop.count));
-            }
-            crate::items::add_items_to_inventory(&mut new_inventory, drops);
-        }
+        apply_battle_loot_drops(actor_player_id, &mut working_players, &mut new_inventory, drops, log);
 
         let dropped_cards = calculate_card_drops(&enemy_names, facility_bonuses.drop_rate as f32);
         if !dropped_cards.is_empty() {
-            push_log(log, "--- 魔獣入手 ---".to_string());
+            push_actor_log(log, actor_player_id, "--- 魔獣入手 ---".to_string());
             for card_id in &dropped_cards {
                 if let Some(card) = crate::cards::get_card(*card_id) {
-                    push_log(log, format!("魔獣「{}」を入手！", card.name));
+                    push_actor_log(log, actor_player_id, format!("魔獣「{}」を入手！", card.name));
                     new_owned_cards.push(*card_id);
                 }
             }
@@ -1553,15 +1660,23 @@ pub(super) fn apply_attack_action(
 
         if is_ruin {
             territories[to_idx].ruin = None;
-            push_log(log, "遺跡を攻略しました！".to_string());
+            push_actor_log(log, actor_player_id, "遺跡を攻略しました！".to_string());
         }
     } else if !partial_occupation {
-        let remaining_monster_counts: Vec<u32> = surviving_enemies.iter().map(|character| character.effective_monster_count()).collect();
-        let remaining_names: Vec<String> = surviving_enemies.iter().map(|character| character.name.clone()).collect();
-        territories[to_idx].troops = remaining_monster_counts.len() as u32;
-        territories[to_idx].body_monster_counts = Some(remaining_monster_counts);
-        territories[to_idx].body_names = if remaining_names.is_empty() { None } else { Some(remaining_names) };
-        push_log(log, format!("攻撃失敗。{}の防衛に成功。", to_name));
+        if attack_own_territory {
+            push_actor_log(
+                log,
+                actor_player_id,
+                format!("演習戦に敗北した。{}の防衛に成功。", to_name),
+            );
+        } else {
+            let remaining_monster_counts: Vec<u32> = surviving_enemies.iter().map(|character| character.effective_monster_count()).collect();
+            let remaining_names: Vec<String> = surviving_enemies.iter().map(|character| character.name.clone()).collect();
+            territories[to_idx].troops = remaining_monster_counts.len() as u32;
+            territories[to_idx].body_monster_counts = Some(remaining_monster_counts);
+            territories[to_idx].body_names = if remaining_names.is_empty() { None } else { Some(remaining_names) };
+            push_actor_log(log, actor_player_id, format!("攻撃失敗。{}の防衛に成功。", to_name));
+        }
     }
 
     let mut new_players = working_players;
@@ -1586,7 +1701,7 @@ pub(super) fn apply_attack_action(
             }
         }
         sync_home_territory_body_counts_from_player(&mut territories, player);
-        if conquered {
+        if conquered && !attack_own_territory {
             if let Some(ref idxs) = owned_card_indices {
                 award_conquest_xp(player, idxs, &facility_bonuses, log);
             }
@@ -1595,13 +1710,13 @@ pub(super) fn apply_attack_action(
 
     // KC仕様: 本拠地陥落 → 対象プレイヤーの所属同盟が、攻撃側の同盟の配下同盟となる
     let mut alliances = state.alliances.clone();
-    if conquered && was_base {
+    if conquered && was_base && !attack_own_territory {
         if let Some(prev) = prev_owner_id.as_deref() {
             subjugate_alliance_of(prev, actor_player_id, &mut alliances, log);
         }
     }
 
-    let mut out = build_game_state(state, state.turn, territories, log.clone(), new_players);
+    let mut out = build_game_state(state, territories, log.clone(), new_players);
     out.alliances = alliances;
     out
 }

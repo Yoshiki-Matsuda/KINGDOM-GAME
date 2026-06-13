@@ -23,6 +23,11 @@ pub(super) fn apply_produce_monsters(
         push_log(log, "無効な魔獣スロットです。".to_string());
         return state.clone();
     }
+    let now = default_now_ms();
+    if super::march::march_locked_card_slots(player, now).contains(&card_index) {
+        push_log(log, "遠征中の魔獣は生産できません。".to_string());
+        return state.clone();
+    }
     let card_id = player.owned_cards[card_index];
     let cap = crate::model::MAX_MONSTER_COUNT_PER_CARD_SLOT;
     let cur = player
@@ -64,7 +69,7 @@ pub(super) fn apply_produce_monsters(
     let mut territories = state.territories.clone();
     sync_home_territory_body_counts_from_player(&mut territories, player);
 
-    build_game_state(state, state.turn, territories, log.clone(), players)
+    build_game_state(state, territories, log.clone(), players)
 }
 
 /// KC準拠合成: 素材魔獣を消費してベース魔獣のスキルレベルアップ
@@ -152,6 +157,7 @@ pub(super) fn apply_synthesize_card(
     let mut card_exp = current_player.card_exp.clone();
     let mut card_stamina = current_player.card_stamina.clone();
     let mut card_status_points = current_player.card_status_points.clone();
+    let mut card_stat_bonuses = current_player.card_stat_bonuses.clone();
     let mut card_rest_until = current_player.card_rest_until.clone();
     let mut card_awakened = current_player.card_awakened.clone();
     let mut card_enhanced = current_player.card_enhanced.clone();
@@ -166,6 +172,9 @@ pub(super) fn apply_synthesize_card(
     }
     if card_status_points.len() == original_owned_len {
         remove_indices_from_parallel_vec(&mut card_status_points, &sorted_removals);
+    }
+    if card_stat_bonuses.len() == original_owned_len {
+        remove_indices_from_parallel_vec(&mut card_stat_bonuses, &sorted_removals);
     }
     if card_rest_until.len() == original_owned_len {
         remove_indices_from_parallel_vec(&mut card_rest_until, &sorted_removals);
@@ -227,6 +236,7 @@ pub(super) fn apply_synthesize_card(
         player.card_exp = card_exp.clone();
         player.card_stamina = card_stamina.clone();
         player.card_status_points = card_status_points.clone();
+        player.card_stat_bonuses = card_stat_bonuses.clone();
         player.card_rest_until = card_rest_until.clone();
         player.card_awakened = card_awakened.clone();
         player.card_enhanced = card_enhanced.clone();
@@ -238,7 +248,7 @@ pub(super) fn apply_synthesize_card(
         sync_home_territory_body_counts_from_player(&mut territories, p);
     }
 
-    build_game_state(state, state.turn, territories, log.clone(), players)
+    build_game_state(state, territories, log.clone(), players)
 }
 
 pub(super) fn calculate_card_drops(enemy_names: &[String], drop_rate_bonus: f32) -> Vec<u32> {
@@ -252,7 +262,7 @@ pub(super) fn calculate_card_drops(enemy_names: &[String], drop_rate_bonus: f32)
             };
             let base_chance = crate::cards::get_card_drop_chance(card.rarity);
             let actual_chance = base_chance * (1.0 + drop_rate_bonus);
-            if rng.gen::<f32>() < actual_chance {
+            if rng.gen::<f32>() < actual_chance && crate::cards::card_has_illustration(card_id) {
                 dropped.push(card_id);
             }
         }

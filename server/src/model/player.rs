@@ -1,5 +1,50 @@
 use super::*;
 
+use std::collections::HashSet;
+
+/// KC: 編成3枠のうちリーダーはインデックス2（前0・中1・リーダー2）
+pub(crate) const KC_LEADER_FORMATION_SLOT_INDEX: usize = 2;
+
+/// リーダー枠が埋まっていれば出撃・守備の対象にできる
+pub(crate) fn is_kc_unit_ready_to_deploy(indices: &[i32; 3]) -> bool {
+    indices[KC_LEADER_FORMATION_SLOT_INDEX] >= 0
+}
+
+/// 前衛→中衛→リーダーの順で、埋まっている本拠スロットを配列化
+pub(crate) fn formation_owned_slots_in_slot_order(indices: &[i32; 3]) -> Vec<usize> {
+    indices
+        .iter()
+        .filter_map(|&i| if i >= 0 { Some(i as usize) } else { None })
+        .collect()
+}
+
+/// 進行中遠征（未到着）で使用中の魔獣スロット（帰還中含む）
+pub(crate) fn march_locked_card_slots(player: &PlayerData, now: u64) -> HashSet<usize> {
+    let mut locked = HashSet::new();
+    for m in &player.marches {
+        if m.arrives_at <= now {
+            continue;
+        }
+        if let Some(ref oci) = m.owned_card_indices {
+            for &i in oci {
+                locked.insert(i);
+            }
+        }
+    }
+    locked
+}
+
+/// 進行中遠征で使用中の編成ユニットID（帰還中含む）
+pub(crate) fn march_busy_formed_unit_ids(player: &PlayerData, now: u64) -> HashSet<String> {
+    player
+        .marches
+        .iter()
+        .filter(|m| m.arrives_at > now)
+        .filter_map(|m| m.formed_unit_id.as_ref())
+        .cloned()
+        .collect()
+}
+
 /// 開発・自動ログイン用。常に最大編成＋魔獣数MAXを維持する。
 pub(crate) const TEST_PLAYER_IDS: &[&str] = &["offline_test", "player"];
 
@@ -12,10 +57,11 @@ pub(crate) fn bootstrap_test_player(player: &mut PlayerData) {
     player.owned_cards = default_owned_cards();
     let n = player.owned_cards.len();
     player.card_monster_counts = vec![MAX_MONSTER_COUNT_PER_CARD_SLOT; n];
-    player.card_stamina = vec![120; n];
+    player.card_stamina = vec![crate::config::max_card_stamina(); n];
     player.card_levels = vec![1; n];
     player.card_exp = vec![0; n];
     player.card_status_points = vec![0; n];
+    player.card_stat_bonuses = vec![CardStatBonuses::default(); n];
     player.card_rest_until = vec![0; n];
     player.card_awakened = vec![false; n];
     player.card_enhanced = vec![false; n];
@@ -88,22 +134,29 @@ pub(crate) fn sync_home_territory_body_counts_from_player(
     territories[tidx].body_monster_counts = Some(player.card_monster_counts.clone());
 }
 
-pub(crate) fn ensure_player_in_game(state: &mut GameState, player_id: &str) {
+pub(crate) const NO_HOME_AVAILABLE_MSG: &str = "配置可能な本拠地がありません。マップが満杯です。";
+
+pub(crate) fn ensure_player_in_game(state: &mut GameState, player_id: &str) -> Result<(), String> {
     if state.players.contains_key(player_id) {
         if is_test_player(player_id) {
             refresh_all_test_players(state);
         }
-        return;
+        return Ok(());
     }
 
-    let home_territory_id = allocate_home_territory(&mut state.territories, player_id)
-        .unwrap_or_else(home_territory_id);
+    let home_territory_id = allocate_home_territory(
+        &mut state.territories,
+        player_id,
+        &state.world,
+    )
+    .ok_or_else(|| NO_HOME_AVAILABLE_MSG.to_string())?;
     let mut player = PlayerData::new(player_id.to_string(), home_territory_id);
     if is_test_player(player_id) {
         bootstrap_test_player(&mut player);
     }
     sync_home_territory_body_counts_from_player(&mut state.territories, &player);
     state.players.insert(player_id.to_string(), player);
+    Ok(())
 }
 
 fn manhattan_distance(a_id: &str, b_id: &str) -> Option<u16> {
@@ -123,32 +176,26 @@ fn min_distance_to_homes(territory_id: &str, existing_homes: &[String]) -> u16 {
         .unwrap_or(u16::MAX)
 }
 
-fn allocate_home_territory(territories: &mut [Territory], player_id: &str) -> Option<String> {
+fn allocate_home_territory(
+    territories: &mut [Territory],
+    player_id: &str,
+    world: &WorldConfig,
+) -> Option<String> {
     let existing_homes: Vec<String> = territories
         .iter()
         .filter(|t| t.is_base && t.owner_id.is_some())
         .map(|t| t.id.clone())
         .collect();
 
-    let neutral_ids: Vec<String> = territories
+    let pool: Vec<String> = territories
         .iter()
         .filter(|t| t.owner_id.is_none() && t.ruin.is_none())
         .map(|t| t.id.clone())
-        .collect();
-
-    let separated: Vec<String> = neutral_ids
-        .iter()
         .filter(|id| {
             min_distance_to_homes(id, &existing_homes) >= MIN_HOME_SEPARATION as u16
+                && can_place_home_with_safe_zone(territories, id, player_id, world)
         })
-        .cloned()
         .collect();
-
-    let pool = if separated.is_empty() {
-        neutral_ids
-    } else {
-        separated
-    };
 
     let chosen_id = pool
         .into_iter()
@@ -162,6 +209,10 @@ fn allocate_home_territory(territories: &mut [Territory], player_id: &str) -> Op
     territory.max_durability = 0;
     territory.tower_level = 0;
     territory.body_names = None;
+
+    let (col, row) = parse_territory_id(&chosen_id)?;
+    apply_home_safe_zone_levels(territories, col as u16, row as u16, world);
+
     Some(chosen_id)
 }
 
@@ -186,8 +237,194 @@ pub(crate) fn territory_name<'a>(territories: &'a [Territory], id: &'a str) -> &
     territories.iter().find(|t| t.id.as_str() == id).map(|t| t.name.as_str()).unwrap_or(id)
 }
 
-pub(crate) use crate::game_log::push_log;
+pub(crate) use crate::game_log::{push_actor_log, push_log};
 
 pub fn migrate_log_timestamps(state: &mut GameState) {
     crate::game_log::migrate_log_timestamps(&mut state.log);
+}
+
+fn remove_indices_from_parallel_vec<T: Clone>(vec: &mut Vec<T>, sorted_asc: &[usize]) {
+    for &idx in sorted_asc.iter().rev() {
+        if idx < vec.len() {
+            vec.remove(idx);
+        }
+    }
+}
+
+fn remap_slot_index_after_removals(old_idx: i32, sorted_removals_asc: &[usize]) -> i32 {
+    if old_idx < 0 {
+        return old_idx;
+    }
+    let old = old_idx as usize;
+    if sorted_removals_asc.binary_search(&old).is_ok() {
+        return -1;
+    }
+    let shift = sorted_removals_asc.iter().filter(|&&r| r < old).count();
+    (old - shift) as i32
+}
+
+fn remap_hashmap_usize_keys_after_removals<T>(
+    map: &mut std::collections::HashMap<usize, T>,
+    sorted_removals_asc: &[usize],
+) {
+    let old: Vec<_> = map.drain().collect();
+    for (idx, val) in old {
+        if sorted_removals_asc.binary_search(&idx).is_ok() {
+            continue;
+        }
+        let shift = sorted_removals_asc.iter().filter(|&&r| r < idx).count();
+        map.insert(idx - shift, val);
+    }
+}
+
+/// イラストなし魔獣スロットを除去し、並列配列・編成インデックスを再マップする
+pub fn migrate_unillustrated_owned_cards(player: &mut PlayerData) -> bool {
+    use crate::cards::card_has_illustration;
+
+    let mut sorted: Vec<usize> = player
+        .owned_cards
+        .iter()
+        .enumerate()
+        .filter(|(_, &id)| !card_has_illustration(id))
+        .map(|(i, _)| i)
+        .collect();
+    if sorted.is_empty() {
+        return false;
+    }
+    sorted.sort_unstable();
+    let original_len = player.owned_cards.len();
+
+    for &idx in sorted.iter().rev() {
+        player.owned_cards.remove(idx);
+    }
+    if player.card_monster_counts.len() == original_len {
+        remove_indices_from_parallel_vec(&mut player.card_monster_counts, &sorted);
+    }
+    if player.card_levels.len() == original_len {
+        remove_indices_from_parallel_vec(&mut player.card_levels, &sorted);
+    }
+    if player.card_exp.len() == original_len {
+        remove_indices_from_parallel_vec(&mut player.card_exp, &sorted);
+    }
+    if player.card_stamina.len() == original_len {
+        remove_indices_from_parallel_vec(&mut player.card_stamina, &sorted);
+    }
+    if player.card_status_points.len() == original_len {
+        remove_indices_from_parallel_vec(&mut player.card_status_points, &sorted);
+    }
+    if player.card_stat_bonuses.len() == original_len {
+        remove_indices_from_parallel_vec(&mut player.card_stat_bonuses, &sorted);
+    }
+    if player.card_rest_until.len() == original_len {
+        remove_indices_from_parallel_vec(&mut player.card_rest_until, &sorted);
+    }
+    if player.card_awakened.len() == original_len {
+        remove_indices_from_parallel_vec(&mut player.card_awakened, &sorted);
+    }
+    if player.card_enhanced.len() == original_len {
+        remove_indices_from_parallel_vec(&mut player.card_enhanced, &sorted);
+    }
+
+    remap_hashmap_usize_keys_after_removals(&mut player.card_skill_levels, &sorted);
+
+    for unit in &mut player.formed_units {
+        for slot in unit.indices.iter_mut() {
+            *slot = remap_slot_index_after_removals(*slot, &sorted);
+        }
+    }
+    for march in &mut player.marches {
+        if let Some(ref mut oci) = march.owned_card_indices {
+            let remapped: Vec<usize> = oci
+                .iter()
+                .map(|&slot| remap_slot_index_after_removals(slot as i32, &sorted))
+                .filter(|&slot| slot >= 0)
+                .map(|slot| slot as usize)
+                .collect();
+            *oci = remapped;
+        }
+    }
+
+    ensure_card_monster_counts(player);
+    true
+}
+
+/// 全プレイヤーのイラストなし魔獣とフリマ出品を整理
+pub fn migrate_unillustrated_cards_state(state: &mut GameState) -> bool {
+    use crate::cards::card_has_illustration;
+
+    let mut changed = false;
+    for player in state.players.values_mut() {
+        if migrate_unillustrated_owned_cards(player) {
+            changed = true;
+        }
+    }
+    let before = state.market_listings.len();
+    state.market_listings.retain(|listing| {
+        !matches!(
+            &listing.item,
+            MarketItemType::Card { card_id } if !card_has_illustration(*card_id)
+        )
+    });
+    if state.market_listings.len() != before {
+        changed = true;
+    }
+    if changed {
+        for player in state.players.values() {
+            sync_home_territory_body_counts_from_player(&mut state.territories, player);
+        }
+        println!("[kingdom-server] イラスト未対応の魔獣スロットを整理しました");
+    }
+    changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_player_rejects_when_no_home_available() {
+        let world = WorldConfig {
+            cols: 6,
+            rows: 6,
+            home_col: 3,
+            home_row: 3,
+            terrain_seed: 1,
+        };
+        let mut state = GameState {
+            world,
+            ..GameState::default()
+        };
+        state.territories = generate_territories(&world, "first", None);
+        state.players.insert(
+            "first".to_string(),
+            PlayerData::new("first".to_string(), format!("c_{}_{}", world.home_col, world.home_row)),
+        );
+
+        for territory in state.territories.iter_mut() {
+            if territory.owner_id.is_none() {
+                territory.owner_id = Some("blocker".to_string());
+            }
+        }
+
+        let before_count = state.players.len();
+        let first_home_owner = state
+            .territories
+            .iter()
+            .find(|t| t.id == format!("c_{}_{}", world.home_col, world.home_row))
+            .and_then(|t| t.owner_id.clone());
+
+        let result = ensure_player_in_game(&mut state, "second");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), NO_HOME_AVAILABLE_MSG);
+        assert_eq!(state.players.len(), before_count);
+        assert!(!state.players.contains_key("second"));
+        assert_eq!(
+            state
+                .territories
+                .iter()
+                .find(|t| t.id == format!("c_{}_{}", world.home_col, world.home_row))
+                .and_then(|t| t.owner_id.clone()),
+            first_home_owner
+        );
+    }
 }

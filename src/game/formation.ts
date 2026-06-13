@@ -16,7 +16,9 @@ import {
   MAX_MONSTER_COUNT_PER_CARD_SLOT,
   MIN_MONSTER_COUNT_PER_CARD_SLOT,
 } from "../shared/game-state";
+import { commitFormedUnits } from "./formed-units-persist";
 import { BODIES_PER_UNIT, DEFAULT_BODY_MONSTER_COUNT, DEFAULT_BODY_SPEED, getCharacterStats } from "./characters";
+import { getEffectiveCardStats } from "./effective-stats";
 import { getEffectiveUnitCostCap } from "./facility-selectors";
 import { getPlayerHomeTerritoryId } from "./territories";
 
@@ -70,12 +72,13 @@ export function validateFormedUnits(): void {
     );
   setBodyMonsterCounts(counts);
 
-  const speeds = [...bodySpeeds];
-  while (speeds.length < homeTroops) {
-    speeds.push(Math.floor(Math.random() * 5) + 3);
-  }
-  const spd = speeds.slice(0, homeTroops);
-  setBodySpeeds(spd);
+  const owned = getPlayerOwnedCards(gameState, getLocalPlayerId());
+  const speeds = counts.map((_, i) => {
+    const cardId = owned[i] ?? 0;
+    return getEffectiveCardStats(cardId, i, gameState, getLocalPlayerId()).speed;
+  });
+  setBodySpeeds(speeds);
+  const spd = speeds;
 
   // 有効なユニット: 各indexが-1（空き）または 0..homeTroops-1
   let units = formedUnitsList.filter((u) =>
@@ -195,13 +198,13 @@ export function ensureDevUnit(): void {
   if (emptyIdx >= 0) {
     const updated = [...formedUnitsList];
     updated[emptyIdx] = applyDefaultFormationToUnit(formedUnitsList[emptyIdx], tri);
-    setFormedUnitsList(updated);
+    commitFormedUnits(updated);
     return;
   }
 
   if (formedUnitsList.length !== 0) return;
 
-  setFormedUnitsList([{
+  commitFormedUnits([{
     id: `unit-${getNextFormedUnitId()}`,
     name: "ユニット1",
     indices: tri,

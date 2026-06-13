@@ -18,7 +18,7 @@ export const PASSIVE_SKILLS: Record<string, Skill> = {
   wind_blessing: {
     id: "wind_blessing",
     name: "疾風の祝福",
-    description: "戦闘開始時、味方全員のSPEED+2",
+    description: "戦闘開始時、味方全員の速さ+2",
     category: "passive",
     timing: "battle_start",
     effects: [{ type: "speed_add", target: "ally_unit", value: 2 }],
@@ -63,7 +63,7 @@ export const PASSIVE_SKILLS: Record<string, Skill> = {
   barrier_field: {
     id: "barrier_field",
     name: "結界展開",
-    description: "戦闘開始時、味方全員にシールド50付与（スキルLvで強化）",
+    description: "戦闘開始時、味方全員にシールド50付与",
     category: "passive",
     timing: "battle_start",
     effects: [{ type: "shield", target: "ally_unit", value: 50 }],
@@ -109,7 +109,7 @@ export const PASSIVE_SKILLS: Record<string, Skill> = {
   poison_aura: {
     id: "poison_aura",
     name: "瘴気の纏い",
-    description: "戦闘開始時、敵全員に毒（毎ターン20ダメージ、スキルLvで強化）",
+    description: "戦闘開始時、敵全員に毒（毎ターン20ダメージ）",
     category: "passive",
     timing: "battle_start",
     effects: [{ type: "poison", target: "enemy_all", value: 20, duration: { turns: 3 } }],
@@ -175,7 +175,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   power_smash: {
     id: "power_smash",
     name: "剛撃",
-    description: "攻撃時、+80ダメージ（スキルLvで強化）",
+    description: "攻撃時、+80ダメージ",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "damage_add", target: "enemy_single", value: 80 }],
@@ -200,7 +200,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   sharp_thrust: {
     id: "sharp_thrust",
     name: "鋭突",
-    description: "攻撃時、+50ダメージ（スキルLvで強化）",
+    description: "攻撃時、+50ダメージ",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "damage_add", target: "enemy_single", value: 50 }],
@@ -208,7 +208,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   swift_blade: {
     id: "swift_blade",
     name: "迅刃",
-    description: "攻撃時、SPEED×0.5を追加ダメージ",
+    description: "攻撃時、知力×0.5を追加ダメージ",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "damage_add", target: "enemy_single", value: 0.5 }],
@@ -236,7 +236,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   whirlwind: {
     id: "whirlwind",
     name: "旋風撃",
-    description: "攻撃時、敵全体に40ダメージ+現在HP3%（スキルLvで強化）",
+    description: "攻撃時、敵全体に40ダメージ+現在HP3%",
     category: "active",
     timing: "on_attack",
     effects: [
@@ -257,7 +257,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   monster_steal: {
     id: "monster_steal",
     name: "奪命の一撃",
-    description: "攻撃時、敵から30魔獣数を奪う（スキルLvで強化）",
+    description: "攻撃時、敵から30魔獣数を奪う",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "monster_steal", target: "enemy_single", value: 30 }],
@@ -265,7 +265,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   heal_strike: {
     id: "heal_strike",
     name: "癒しの剣",
-    description: "攻撃時、HP最低の味方を30回復（スキルLvで強化）",
+    description: "攻撃時、HP最低の味方を30回復",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "heal", target: "ally_lowest_hp", value: 30 }],
@@ -283,7 +283,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   percent_cut: {
     id: "percent_cut",
     name: "割合斬り",
-    description: "攻撃時、敵の現在HPの20%ダメージ（スキルLvで強化）",
+    description: "攻撃時、敵の現在HPの20%ダメージ",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "percent_damage", target: "enemy_single", value: 0.2 }],
@@ -301,7 +301,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   blaze_edge: {
     id: "blaze_edge",
     name: "炎刃",
-    description: "攻撃時、敵に炎上付与（3ターン、毎ターン30ダメージ、スキルLvで強化）",
+    description: "攻撃時、敵に炎上付与（3ターン、毎ターン30ダメージ）",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "burn", target: "enemy_single", value: 30, duration: { turns: 3 } }],
@@ -309,7 +309,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   venom_fang: {
     id: "venom_fang",
     name: "毒牙",
-    description: "攻撃時、敵に毒付与（3ターン、毎ターン20ダメージ、スキルLvで強化）",
+    description: "攻撃時、敵に毒付与（3ターン、毎ターン20ダメージ）",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "poison", target: "enemy_single", value: 20, duration: { turns: 3 } }],
@@ -362,7 +362,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   shield_bash: {
     id: "shield_bash",
     name: "盾撃",
-    description: "攻撃時、自分にシールド30付与（スキルLvで強化）",
+    description: "攻撃時、自分にシールド30付与",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "shield", target: "self", value: 30 }],
@@ -390,7 +390,7 @@ export const ACTIVE_SKILLS: Record<string, Skill> = {
   mark_target: {
     id: "mark_target",
     name: "狙撃",
-    description: "攻撃時、敵にマーク付与（被ダメージ+50、3ターン、スキルLvで強化）",
+    description: "攻撃時、敵にマーク付与（被ダメージ+50、3ターン）",
     category: "active",
     timing: "on_attack",
     effects: [{ type: "mark", target: "enemy_single", value: 50, duration: { turns: 3 } }],
@@ -419,7 +419,7 @@ export const UNIQUE_SKILLS: Record<string, Skill> = {
   thunder_call: {
     id: "thunder_call",
     name: "雷神招来",
-    description: "攻撃時、50%で敵全体に+100ダメージ（スキルLvで強化）",
+    description: "攻撃時、50%で敵全体に+100ダメージ",
     category: "unique",
     timing: "on_attack",
     effects: [{ type: "true_damage", target: "enemy_all", value: 100 }],
@@ -493,7 +493,7 @@ export const UNIQUE_SKILLS: Record<string, Skill> = {
   plague_touch: {
     id: "plague_touch",
     name: "疫病の手",
-    description: "攻撃時、敵全員に毒付与（毎ターン50ダメージ、3ターン、スキルLvで強化）",
+    description: "攻撃時、敵全員に毒付与（毎ターン50ダメージ、3ターン）",
     category: "unique",
     timing: "on_attack",
     effects: [{ type: "poison", target: "enemy_all", value: 50, duration: { turns: 3 } }],

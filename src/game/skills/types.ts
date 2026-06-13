@@ -34,8 +34,8 @@ export type SkillEffectType =
   | "monster_multiply"   // 魔獣数倍率
   | "monster_add"        // 魔獣数加算
   | "monster_set"        // 魔獣数固定値設定
-  | "speed_multiply"    // SPEED倍率
-  | "speed_add"         // SPEED加算
+  | "speed_multiply"    // 速さ倍率
+  | "speed_add"         // 速さ加算
   | "damage_multiply"   // ダメージ倍率
   | "damage_add"        // ダメージ加算
   | "damage_reduce"     // ダメージ軽減率

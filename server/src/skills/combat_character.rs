@@ -46,6 +46,10 @@ pub struct CombatCharacter {
     pub base_monster_count: u32,
     pub current_monster_count: f32,
     pub current_speed: f32,
+    /// スタートアップ前の速さ（ウェーブ間でスキル効果をリセットする際の基準）
+    pub pre_startup_speed: f32,
+    /// 当ウェーブのスタートアップで掛かった魔獣数倍率（ウェーブ間リセット用）
+    pub startup_monster_factor: f32,
     /// 攻撃力（物理ダメージ）
     pub attack: u32,
     /// 知力（スキル効果に影響）
@@ -78,6 +82,8 @@ impl CombatCharacter {
             base_monster_count: monster_count,
             current_monster_count: monster_count as f32,
             current_speed: speed as f32,
+            pre_startup_speed: speed as f32,
+            startup_monster_factor: 1.0,
             attack: 5,
             intelligence: 5,
             defense: 3,
@@ -113,6 +119,8 @@ impl CombatCharacter {
             base_monster_count: monster_count,
             current_monster_count: monster_count as f32,
             current_speed: speed as f32,
+            pre_startup_speed: speed as f32,
+            startup_monster_factor: 1.0,
             attack,
             intelligence,
             defense,

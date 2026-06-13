@@ -5,12 +5,10 @@
 import type { Territory } from "../store";
 import {
   gameState, ws,
-  attackSourceId, setAttackSourceId,
-  formedUnitsList,
-  render,
+  render, getLocalPlayerId,
 } from "../store";
 import { canReceiveReinforcement, isAttackable, getAdjacentAttackSource, isHomeTerritory } from "../game/combat";
-import { isKcUnitReadyToDeploy } from "../game/formation";
+import { getMarchFromTerritory, getPlayerHomeTerritoryId } from "../game/territories";
 import {
   formatRuinTimeLeft,
   renderNeutralTerritoryMenu,
@@ -18,6 +16,7 @@ import {
   renderRuinContextMenu,
 } from "../context-menu-view";
 import { showUnitSelect } from "./unit-select";
+import { showGameNotice } from "./game-notice";
 
 let menuEl: HTMLDivElement;
 let ruinTimerId: number | null = null;
@@ -86,7 +85,8 @@ export function showMenuAt(x: number, y: number, territoryId: string, territory:
     const canDeploy = canReceiveReinforcement(gameState, t);
 
     if (canDeploy) {
-      menuEl.innerHTML = renderOwnedTerritoryMenu(territoryId, t);
+      const attackable = isAttackable(gameState, territoryId);
+      menuEl.innerHTML = renderOwnedTerritoryMenu(territoryId, t, attackable);
     } else {
       const attackable = isAttackable(gameState, territoryId);
       menuEl.innerHTML = renderNeutralTerritoryMenu(
@@ -122,22 +122,13 @@ function onMenuClick(e: MouseEvent): void {
 
   if (action === "deploy") {
     const tid = btn.dataset.territory ?? null;
-    const hasFormedUnit = formedUnitsList.filter((u) => isKcUnitReadyToDeploy(u.indices)).length >= 1;
     if (!tid) {
       closeMenu();
       return;
     }
-    if (!hasFormedUnit) {
-      alert(
-        "援軍に出せるユニットがありません。編成画面でリーダー枠にキャラを置いてユニットを編成してください。",
-      );
-      closeMenu();
-      render();
-      return;
-    }
     if (ws?.readyState !== WebSocket.OPEN) {
-      alert("サーバーに接続されていません。接続後にもう一度お試しください。");
       closeMenu();
+      showGameNotice("サーバーに接続されていません。接続後にもう一度お試しください。");
       render();
       return;
     }
@@ -145,46 +136,56 @@ function onMenuClick(e: MouseEvent): void {
     showUnitSelect({ type: "deploy", territoryId: tid });
     return;
   }
-  if (action === "attack-from") {
-    setAttackSourceId(btn.dataset.territory ?? null);
-    closeMenu();
-    render();
-    return;
-  }
   if (action === "attack") {
     const toId = btn.dataset.to ?? null;
-    const fromId = attackSourceId ?? (toId ? getAdjacentAttackSource(gameState, toId) : null);
-    const hasFormedUnit = formedUnitsList.filter((u) => isKcUnitReadyToDeploy(u.indices)).length >= 1;
+    const fromId = toId ? getAdjacentAttackSource(gameState, toId) : null;
     if (!toId) {
-      alert("攻撃先のマスが不正です。");
       closeMenu();
+      console.warn("[kingdom] 攻撃先のマスが不正です。");
       render();
       return;
     }
     if (!fromId) {
-      alert(
-        "このマスに隣接する自領がありません。本拠や占領済みマスの隣から攻撃してください。自領マスで「攻撃」を選んでから隣の敵／中立マスを攻撃することもできます。",
-      );
       closeMenu();
-      render();
-      return;
-    }
-    if (!hasFormedUnit) {
-      alert(
-        "攻撃に出せるユニットがありません。編成画面でリーダー枠にキャラを置いてから、もう一度お試しください。",
+      showGameNotice(
+        "このマスに隣接する自領がありません。本拠や占領済みマスの隣から攻撃してください。",
       );
-      closeMenu();
       render();
       return;
     }
     if (ws?.readyState !== WebSocket.OPEN) {
-      alert("サーバーに接続されていません。接続後にもう一度お試しください。");
       closeMenu();
+      showGameNotice("サーバーに接続されていません。接続後にもう一度お試しください。");
       render();
       return;
     }
     closeMenu();
     showUnitSelect({ type: "attack", fromId, toId });
+    return;
+  }
+  if (action === "explore") {
+    const toId = btn.dataset.territory ?? null;
+    if (!toId) {
+      closeMenu();
+      return;
+    }
+    const playerId = getLocalPlayerId();
+    const homeId = getPlayerHomeTerritoryId(gameState, playerId);
+    const fromId = getMarchFromTerritory(gameState, playerId, toId, homeId);
+    if (!fromId) {
+      closeMenu();
+      showGameNotice("この領地へ派遣できる隣接する自領がありません。");
+      render();
+      return;
+    }
+    if (ws?.readyState !== WebSocket.OPEN) {
+      closeMenu();
+      showGameNotice("サーバーに接続されていません。接続後にもう一度お試しください。");
+      render();
+      return;
+    }
+    closeMenu();
+    showUnitSelect({ type: "explore", fromId, toId });
     return;
   }
 }

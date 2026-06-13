@@ -1021,12 +1021,12 @@ export const FACILITIES: Record<FacilityId, FacilityDef> = {
     name: "英雄像",
     icon: "🗿",
     category: "special",
-    description: "スピードを強化する",
+    description: "速さを強化する",
     maxLevel: 3,
     levels: [
       {
         level: 1,
-        description: "スピード+2",
+        description: "速さ+2",
         effect: { type: "speed_bonus", value: 2 },
         cost: [
           { itemId: "ancient_stone", count: 30 },
@@ -1036,7 +1036,7 @@ export const FACILITIES: Record<FacilityId, FacilityDef> = {
       },
       {
         level: 2,
-        description: "スピード+4",
+        description: "速さ+4",
         effect: { type: "speed_bonus", value: 4 },
         cost: [
           { itemId: "refined_iron", count: 40 },
@@ -1047,7 +1047,7 @@ export const FACILITIES: Record<FacilityId, FacilityDef> = {
       },
       {
         level: 3,
-        description: "スピード+7",
+        description: "速さ+7",
         effect: { type: "speed_bonus", value: 7 },
         cost: [
           { itemId: "refined_iron", count: 80 },

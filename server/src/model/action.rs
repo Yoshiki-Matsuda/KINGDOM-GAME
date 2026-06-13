@@ -1,13 +1,13 @@
 use super::*;
 
 pub use crate::cards::CardStats;
+use crate::model::MarchKind;
+use crate::skills::SkillData;
 
 /// クライアントから送る行動。JSON の action は小文字スネーク（クライアントと一致）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action")]
 pub enum Action {
-    #[serde(rename = "end_turn")]
-    EndTurn,
     /// 自領地に増援。owner_id == "player" の領地のみ。
     #[serde(rename = "deploy")]
     Deploy {
@@ -35,7 +35,7 @@ pub enum Action {
         /// 攻撃するユニットの表示名（ログの「〇〇が△△を攻撃」の〇〇）。未指定時は領地名。
         #[serde(default)]
         unit_name: Option<String>,
-        /// 攻撃側の体ごとのSPEED。未指定時は各5として扱う。
+        /// 攻撃側の体ごとの速さ。未指定時は各5として扱う。
         #[serde(default)]
         speed_per_body: Option<Vec<u32>>,
         /// 攻撃側の体ごとのスキルデータ。
@@ -103,17 +103,29 @@ pub enum Action {
     CancelFleaMarketListing {
         listing_id: String,
     },
-    /// 探索を開始（占領済み領地・同時派遣数は exploration_level まで）
-    #[serde(rename = "start_exploration")]
-    StartExploration {
-        territory_id: String,
+    /// 遠征を開始（攻撃・援軍・探索）
+    #[serde(rename = "start_march")]
+    StartMarch {
+        kind: MarchKind,
+        from_territory_id: String,
+        to_territory_id: String,
+        count: u32,
         #[serde(default)]
-        card_indices: Vec<usize>,
-    },
-    /// 探索結果を回収
-    #[serde(rename = "collect_exploration")]
-    CollectExploration {
-        mission_id: String,
+        monsters_per_body: Option<Vec<u32>>,
+        #[serde(default)]
+        body_names: Option<Vec<String>>,
+        #[serde(default)]
+        unit_name: Option<String>,
+        #[serde(default)]
+        speed_per_body: Option<Vec<u32>>,
+        #[serde(default)]
+        skills_per_body: Option<Vec<SkillData>>,
+        #[serde(default)]
+        stats_per_body: Option<Vec<CardStats>>,
+        #[serde(default)]
+        owned_card_indices: Option<Vec<usize>>,
+        #[serde(default)]
+        formed_unit_id: Option<String>,
     },
     /// 同盟へ資源寄付（同盟レベル・寄付累計が増加）
     #[serde(rename = "donate_alliance")]
@@ -122,5 +134,20 @@ pub enum Action {
         wood: u64,
         stone: u64,
         iron: u64,
+    },
+    /// ユニット編成の保存
+    #[serde(rename = "set_formed_units")]
+    SetFormedUnits {
+        units: Vec<StoredFormedUnit>,
+    },
+    /// 所持魔獣スロットへステータスポイントを振り分け
+    #[serde(rename = "allocate_card_stats")]
+    AllocateCardStats {
+        card_index: usize,
+        speed: u32,
+        attack: u32,
+        intelligence: u32,
+        defense: u32,
+        magic_defense: u32,
     },
 }

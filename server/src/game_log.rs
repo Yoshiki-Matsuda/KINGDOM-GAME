@@ -17,6 +17,11 @@ pub(crate) fn push_log(log: &mut Vec<String>, line: String) {
     }
 }
 
+/// 行動主体プレイヤー付きログ（クライアントが他プレイヤー/AIのログを戦歴から除外する）
+pub(crate) fn push_actor_log(log: &mut Vec<String>, actor_player_id: &str, line: String) {
+    push_log(log, format!("[p:{actor_player_id}]{line}"));
+}
+
 pub(crate) fn extract_log_ts(line: &str) -> Option<u64> {
     let rest = line.strip_prefix("[ts:")?;
     let num = rest.split(']').next()?;

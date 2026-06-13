@@ -2,15 +2,18 @@
  * ステータス画面
  */
 
-import { setCurrentScreen, render, gameState, ws, getLocalPlayerId } from "../store";
+import { setCurrentScreen, render, gameState, getLocalPlayerId } from "../store";
 import {
   getPlayerData,
   getPlayerFacilities,
+  getPlayerMarches,
   getPlayerOwnedCards,
   getPlayerResources,
 } from "../shared/game-state";
 import { calculateFacilityBonuses } from "../game/facilities";
 import { getCompletedFacilitiesMap } from "../game/facility-selectors";
+import { renderScreenHeaderTitle } from "./screen-header";
+import { renderResourceValueHtml } from "./resource-display";
 
 let statusEl: HTMLDivElement | null = null;
 
@@ -34,7 +37,7 @@ export function renderStatus(): void {
   const bonuses = calculateFacilityBonuses(getCompletedFacilitiesMap(facilities));
   const ownedCards = getPlayerOwnedCards(gameState, getLocalPlayerId());
   const player = getPlayerData(gameState, getLocalPlayerId());
-  const explorations = player?.explorations ?? [];
+  const marches = getPlayerMarches(gameState, getLocalPlayerId());
   const explorationLv = player?.exploration_level ?? 1;
   const explorationScore = player?.exploration_score ?? 0;
   const res = getPlayerResources(gameState, getLocalPlayerId());
@@ -43,7 +46,7 @@ export function renderStatus(): void {
   const bonusRows = [
     bonuses.monsterBonus > 0 && `<div class="status-row">魔獣数上限: +${bonuses.monsterBonus}</div>`,
     bonuses.monsterPercent > 0 && `<div class="status-row">魔獣数増加: +${bonuses.monsterPercent}%</div>`,
-    bonuses.speedBonus > 0 && `<div class="status-row">スピード: +${bonuses.speedBonus}</div>`,
+    bonuses.speedBonus > 0 && `<div class="status-row">速さ: +${bonuses.speedBonus}</div>`,
     bonuses.skillPower > 0 && `<div class="status-row">スキル効果: +${bonuses.skillPower}%</div>`,
     bonuses.attackBonus > 0 && `<div class="status-row">攻撃力: +${bonuses.attackBonus}</div>`,
     bonuses.defenseBonus > 0 && `<div class="status-row">防御力: +${bonuses.defenseBonus}</div>`,
@@ -53,16 +56,16 @@ export function renderStatus(): void {
 
   statusEl.innerHTML = `
     <div class="sub-screen-header">
-      <h2>📊 ステータス</h2>
+      <h2>${renderScreenHeaderTitle("status", "ステータス")}</h2>
     </div>
     <div class="sub-screen-content">
       <div class="status-section">
         <h3>資源</h3>
-        <div class="status-row">🌾 食料: ${res.food.toLocaleString()}</div>
-        <div class="status-row">🪵 木材: ${res.wood.toLocaleString()}</div>
-        <div class="status-row">🪨 石材: ${res.stone.toLocaleString()}</div>
-        <div class="status-row">⛏️ 鉄: ${res.iron.toLocaleString()}</div>
-        <div class="status-row">💰 ゴールド: ${res.gold.toLocaleString()}</div>
+        <div class="status-row">${renderResourceValueHtml("food", res.food)}</div>
+        <div class="status-row">${renderResourceValueHtml("wood", res.wood)}</div>
+        <div class="status-row">${renderResourceValueHtml("stone", res.stone)}</div>
+        <div class="status-row">${renderResourceValueHtml("iron", res.iron)}</div>
+        <div class="status-row">${renderResourceValueHtml("gold", res.gold)}</div>
       </div>
       <div class="status-section">
         <h3>施設ボーナス</h3>
@@ -79,14 +82,17 @@ export function renderStatus(): void {
         <h3>探索</h3>
         <div class="status-row">探索レベル: ${explorationLv}（スコア ${explorationScore}）</div>
         ${
-          explorations.length === 0
-            ? '<div class="status-row dim">進行中の探索はありません。JSONで <code>start_exploration</code> を送るか今後UIから派遣予定。</div>'
-            : explorations
+          marches.length === 0
+            ? '<div class="status-row dim">進行中の遠征はありません。</div>'
+            : marches
                 .map((m) => {
-                  const done = now >= m.completes_at;
-                  return `<div class="status-row exploration-row" data-mission="${m.mission_id}">
-            ${m.territory_id} … ${done ? '<span class="explore-done">回収可能</span>' : `残り約 ${Math.max(0, Math.ceil((m.completes_at - now) / 1000))} 秒`}
-            ${done ? `<button type="button" class="btn-collect-explore" data-mission="${m.mission_id}">回収</button>` : ""}
+                  const secLeft = Math.max(0, Math.ceil((m.arrives_at - now) / 1000));
+                  const kindLabel =
+                    m.kind === "attack" ? "攻撃" :
+                    m.kind === "explore" ? "探索" :
+                    m.kind === "deploy" ? "援軍" : "帰還";
+                  return `<div class="status-row exploration-row">
+            ${kindLabel}: ${m.from_territory_id} → ${m.to_territory_id} … 残り約 ${secLeft} 秒
           </div>`;
                 })
                 .join("")
@@ -94,12 +100,4 @@ export function renderStatus(): void {
       </div>
     </div>
   `;
-
-  statusEl.querySelectorAll(".btn-collect-explore").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = (btn as HTMLButtonElement).dataset.mission;
-      if (!id || ws?.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ action: "collect_exploration", mission_id: id }));
-    });
-  });
 }
