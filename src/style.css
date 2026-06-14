@@ -512,16 +512,17 @@ body.login-active #app {
   text-align: center;
 }
 
-.resource-amount {
+.hud-resources .resource-amount {
+  color: #e8d5b5;
   font-variant-numeric: tabular-nums;
   text-align: left;
 }
 
-.resource-amount.resource-flash-up {
+.hud-resources .resource-amount.resource-flash-up {
   animation: resource-flash-up 0.45s ease-out;
 }
 
-.resource-amount.resource-flash-down {
+.hud-resources .resource-amount.resource-flash-down {
   animation: resource-flash-down 0.45s ease-out;
 }
 
@@ -554,8 +555,8 @@ body.login-active #app {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .resource-amount.resource-flash-up,
-  .resource-amount.resource-flash-down {
+  .hud-resources .resource-amount.resource-flash-up,
+  .hud-resources .resource-amount.resource-flash-down {
     animation: none;
   }
 }
