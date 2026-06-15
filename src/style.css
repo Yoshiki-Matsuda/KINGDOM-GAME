@@ -3498,3 +3498,103 @@ body.login-active #app {
 .pack-info p {
   margin: 0;
 }
+
+/* ===== モード切替ローディングオーバーレイ ===== */
+
+.mode-switch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 15, 0);
+  transition: background 0.4s ease;
+  pointer-events: none;
+}
+
+.mode-switch-overlay.is-active {
+  background: rgba(10, 10, 15, 0.92);
+  pointer-events: all;
+}
+
+.mode-switch-overlay.is-exiting {
+  background: rgba(10, 10, 15, 0);
+}
+
+.mode-switch-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  transform: scale(0.85) translateY(20px);
+  opacity: 0;
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.4s ease;
+}
+
+.mode-switch-overlay.is-active .mode-switch-content {
+  transform: scale(1) translateY(0);
+  opacity: 1;
+}
+
+.mode-switch-overlay.is-exiting .mode-switch-content {
+  transform: scale(0.9) translateY(-10px);
+  opacity: 0;
+}
+
+.mode-switch-icon {
+  color: var(--accent-gold);
+  filter: drop-shadow(0 0 12px rgba(201, 168, 76, 0.35));
+  animation: mode-switch-spin 4s linear infinite, mode-switch-pulse 2s ease-in-out infinite;
+}
+
+.mode-switch-icon-wrap {
+  width: 64px;
+  height: 64px;
+  border: 2px solid var(--border-gold);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 21, 16, 0.8);
+  box-shadow: 0 0 20px rgba(201, 168, 76, 0.12), inset 0 0 12px rgba(201, 168, 76, 0.05);
+}
+
+.mode-switch-label {
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-shadow: 0 0 8px rgba(201, 168, 76, 0.2);
+}
+
+.mode-switch-progress {
+  width: 180px;
+  height: 3px;
+  background: rgba(201, 168, 76, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mode-switch-progress-bar {
+  height: 100%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, var(--accent-gold), transparent);
+  border-radius: 2px;
+  animation: mode-switch-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes mode-switch-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes mode-switch-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+
+@keyframes mode-switch-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
