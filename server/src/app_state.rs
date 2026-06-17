@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
+use sqlx::sqlite::SqlitePool;
 use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 
 use crate::model::{GameState, WorldConfig};
@@ -20,8 +20,7 @@ pub(crate) struct AppState {
     pub(crate) mutation_lock: Arc<Mutex<()>>,
     /// PVPモード用グローバルブロードキャスト
     pub(crate) broadcast_tx: broadcast::Sender<String>,
-    pub(crate) state_path: PathBuf,
-    pub(crate) auth_path: PathBuf,
+    pub(crate) db_pool: SqlitePool,
     pub(crate) jwt_secret: Arc<Vec<u8>>,
     pub(crate) dev_auto_win: bool,
     pub(crate) world_config: WorldConfig,
@@ -55,5 +54,10 @@ impl AppState {
                 }
             }
         }
+    }
+
+    /// PVP用ワールドID
+    pub(crate) fn pvp_world_id(&self) -> &'static str {
+        crate::db::world_repo::pvp_world_id()
     }
 }

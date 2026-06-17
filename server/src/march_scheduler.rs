@@ -10,7 +10,7 @@ use tokio::time::{sleep, Instant, Sleep};
 use crate::{
     app_state::{AppState, GameStore},
     model::{ms_until_march_processing, tick_march_arrivals},
-    persistence::{save_player_world, save_state},
+    persistence,
 };
 
 pub(crate) fn spawn_march_scheduler(state: AppState) {
@@ -86,7 +86,7 @@ async fn process_shared_world(
         let mut game = game.write().await;
         let changed = tick_march_arrivals(&mut game, state.dev_auto_win, state.server_mode);
         if changed {
-            let _ = save_state(&state.state_path, &game).await;
+            let _ = persistence::save_state(&state.db_pool, state.pvp_world_id(), "pvp", &game).await;
         }
         changed
     };
@@ -108,7 +108,7 @@ async fn process_player_world(
         let mut game = world.write().await;
         let changed = tick_march_arrivals(&mut game, state.dev_auto_win, state.server_mode);
         if changed {
-            let _ = save_player_world(mgr.base_path(), player_id, &game).await;
+            let _ = persistence::save_player_world(&state.db_pool, player_id, &game).await;
         }
         changed
     };

@@ -1,29 +1,17 @@
-use std::path::Path;
-
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use sqlx::sqlite::SqlitePool;
 
 use crate::model::{ensure_player_in_game, GameState, TEST_PLAYER_IDS};
 use crate::config;
+use crate::db::auth_repo;
 use crate::server_mode::ServerMode;
 
 const TOKEN_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct AuthUser {
-    pub(crate) username: String,
-    pub(crate) player_id: String,
-    password_hash: String,
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub(crate) struct AuthStore {
-    users: Vec<AuthUser>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AuthClaims {
@@ -46,51 +34,16 @@ pub(crate) struct AuthResponse {
     pub(crate) username: String,
 }
 
-/// 開発用テストアカウントが未登録なら `data/auth.json` に追加する。
-pub(crate) async fn ensure_dev_auth_users(path: &Path) -> Result<(), String> {
+/// 開発用テストアカウントをDBに確保する
+pub(crate) async fn ensure_dev_auth_users(pool: &SqlitePool) -> Result<(), String> {
     let password = config::dev_auth_password();
     validate_password(&password)?;
-
-    let mut store = load_store(path).await;
-    let mut changed = false;
-    for &username in TEST_PLAYER_IDS {
-        if store.users.iter().any(|user| user.username == username) {
-            continue;
-        }
-        let password_hash = hash_password(&password)?;
-        store.users.push(AuthUser {
-            username: username.to_string(),
-            player_id: username.to_string(),
-            password_hash,
-        });
-        changed = true;
-        println!("[kingdom-server] テスト用アカウントを作成しました: {username}（パスワード: {password}）");
-    }
-    if changed {
-        save_store(path, &store).await?;
-    }
-    Ok(())
-}
-
-pub(crate) async fn load_store(path: &Path) -> AuthStore {
-    let Ok(data) = tokio::fs::read_to_string(path).await else {
-        return AuthStore::default();
-    };
-    serde_json::from_str(&data).unwrap_or_default()
-}
-
-async fn save_store(path: &Path, store: &AuthStore) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    let data = serde_json::to_string_pretty(store).map_err(|e| e.to_string())?;
-    tokio::fs::write(path, data).await.map_err(|e| e.to_string())
+    let password_hash = hash_password(&password)?;
+    auth_repo::ensure_dev_users(pool, &password_hash, TEST_PLAYER_IDS).await
 }
 
 pub(crate) async fn register(
-    path: &Path,
+    pool: &SqlitePool,
     jwt_secret: &[u8],
     server_mode: ServerMode,
     game: Option<&mut GameState>,
@@ -99,19 +52,18 @@ pub(crate) async fn register(
     let username = normalize_username(&req.username)?;
     validate_password(&req.password)?;
 
-    let mut store = load_store(path).await;
-    if store.users.iter().any(|user| user.username == username) {
+    if auth_repo::find_user_by_username(pool, &username).await.is_some() {
         return Err("このユーザー名は既に使われています。".to_string());
     }
 
     let player_id = username.clone();
     let password_hash = hash_password(&req.password)?;
-    store.users.push(AuthUser {
+    let user = auth_repo::DbAuthUser {
         username: username.clone(),
         player_id: player_id.clone(),
         password_hash,
-    });
-    save_store(path, &store).await?;
+    };
+    auth_repo::insert_user(pool, &user).await.map_err(|e| e.to_string())?;
 
     if let Some(game) = game {
         ensure_player_in_game(game, &player_id)?;
@@ -121,17 +73,15 @@ pub(crate) async fn register(
 }
 
 pub(crate) async fn login(
-    path: &Path,
+    pool: &SqlitePool,
     jwt_secret: &[u8],
     server_mode: ServerMode,
     game: Option<&mut GameState>,
     req: AuthRequest,
 ) -> Result<AuthResponse, String> {
     let username = normalize_username(&req.username)?;
-    let store = load_store(path).await;
-    let Some(user) = store.users.iter().find(|user| user.username == username) else {
-        return Err("ユーザー名またはパスワードが違います。".to_string());
-    };
+    let user = auth_repo::find_user_by_username(pool, &username).await
+        .ok_or_else(|| "ユーザー名またはパスワードが違います。".to_string())?;
     verify_password(&req.password, &user.password_hash)?;
 
     if let Some(game) = game {
@@ -140,13 +90,14 @@ pub(crate) async fn login(
     let token = issue_token(jwt_secret, &user.player_id, &user.username, server_mode)?;
     Ok(AuthResponse {
         token,
-        player_id: user.player_id.clone(),
-        username: user.username.clone(),
+        player_id: user.player_id,
+        username: user.username,
     })
 }
 
 /// 他モードの JWT から、このサーバーの mode 付きトークンを再発行する（HUD 切替用）
 pub(crate) async fn exchange_token(
+    _pool: &SqlitePool,
     jwt_secret: &[u8],
     server_mode: ServerMode,
     game: Option<&mut GameState>,

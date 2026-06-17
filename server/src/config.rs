@@ -23,8 +23,8 @@ pub const ENV_WORLD_ROWS: &str = "WORLD_ROWS";
 pub const ENV_WORLD_HOME_COL: &str = "WORLD_HOME_COL";
 pub const ENV_WORLD_HOME_ROW: &str = "WORLD_HOME_ROW";
 pub const ENV_WORLD_TERRAIN_SEED: &str = "WORLD_TERRAIN_SEED";
-pub const ENV_STATE_PATH: &str = "STATE_PATH";
-pub const ENV_AUTH_PATH: &str = "AUTH_PATH";
+pub const ENV_DATABASE_URL: &str = "DATABASE_URL";
+pub const DEFAULT_DATABASE_URL: &str = "sqlite://kingdom.db?mode=rwc";
 pub const ENV_ADMIN_PLAYER_ID: &str = "ADMIN_PLAYER_ID";
 pub const ENV_DEV_AUTH_PASSWORD: &str = "DEV_AUTH_PASSWORD";
 pub const ENV_DEV_BOT_USERNAME: &str = "DEV_BOT_USERNAME";
@@ -55,7 +55,6 @@ pub const DEFAULT_WORLD_COLS: u16 = 48;
 pub const DEFAULT_WORLD_ROWS: u16 = 48;
 pub const DEFAULT_HOME_COL: u8 = 24;
 pub const DEFAULT_HOME_ROW: u8 = 24;
-pub const DEFAULT_AUTH_PATH_REL: &str = "data/auth.json";
 pub const DEFAULT_JWT_SECRET: &str = "dev-only-change-this-secret";
 pub const DEFAULT_ADMIN_PLAYER_ID: &str = "admin";
 /// フロントの `VITE_DEV_PASSWORD` 既定値と揃える
@@ -177,8 +176,8 @@ pub(crate) fn admin_player_id() -> String {
     env_string(ENV_ADMIN_PLAYER_ID, DEFAULT_ADMIN_PLAYER_ID)
 }
 
-pub(crate) fn auth_path_rel() -> String {
-    env_string(ENV_AUTH_PATH, DEFAULT_AUTH_PATH_REL)
+pub(crate) fn database_url() -> String {
+    env_string(ENV_DATABASE_URL, DEFAULT_DATABASE_URL)
 }
 
 pub(crate) fn dev_auth_password() -> String {

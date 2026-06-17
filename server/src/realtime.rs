@@ -14,7 +14,7 @@ use crate::{
         apply_action, check_season_end, client_view_json, tick_world,
         Action, GameState,
     },
-    persistence::{save_player_world, save_state},
+    persistence,
     server_mode::ServerMode,
 };
 
@@ -47,7 +47,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                     check_season_end(&mut game);
                 }
                 state.wake_march_scheduler_if_active(&game);
-                let _ = save_state(&state.state_path, &game).await;
+                let _ = persistence::save_state(&state.db_pool, state.pvp_world_id(), "pvp", &game).await;
                 if is_pvp {
                     client_view_json(&game, &actor_player_id, server_mode)
                 } else {
@@ -69,7 +69,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 let mut game = world.write().await;
                 tick_world(&mut game, state.dev_auto_win, server_mode);
                 state.wake_march_scheduler_if_active(&game);
-                let _ = save_player_world(mgr.base_path(), &actor_player_id, &game).await;
+                let _ = persistence::save_player_world(&state.db_pool, &actor_player_id, &game).await;
                 serde_json::to_string(&*game)
                     .unwrap_or_else(|_| r#"{"error":"serialize"}"#.to_string())
             };
@@ -200,7 +200,7 @@ async fn persist_and_broadcast(state: &AppState, player_id: &str, new_state: &Ga
     let json = serde_json::to_string(new_state).unwrap_or_default();
     match &state.store {
         GameStore::Shared(_) => {
-            let _ = save_state(&state.state_path, new_state).await;
+            let _ = persistence::save_state(&state.db_pool, state.pvp_world_id(), "pvp", new_state).await;
             state.broadcast_json(None, json);
         }
         GameStore::PerPlayer(mgr) => {

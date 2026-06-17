@@ -32,5 +32,4 @@ pub use travel::{average_speed, travel_time_ms};
 pub use world::migrate_legacy_neutral_enemies;
 pub use world::generate_territories;
 pub use world::resolve_terrain_seed;
-pub use world::migrate_legacy_terrain;
 pub(crate) use world::*;

@@ -1,13 +1,13 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use sqlx::sqlite::SqlitePool;
 use tokio::sync::{broadcast, RwLock};
 
 use crate::model::{GameState, MarchKind, WorldConfig};
 use crate::config;
-use crate::persistence::{load_player_world, save_player_world, world_path};
+use crate::db::world_repo;
 use crate::pve_world::new_pve;
 
 struct WorldEntry {
@@ -20,21 +20,22 @@ struct WorldEntry {
 #[derive(Clone)]
 pub(crate) struct WorldManager {
     inner: Arc<RwLock<HashMap<String, WorldEntry>>>,
-    base_path: PathBuf,
+    pool: SqlitePool,
     world_config: WorldConfig,
 }
 
 impl WorldManager {
-    pub(crate) fn new(base_path: PathBuf, world_config: WorldConfig) -> Self {
+    pub(crate) fn new(pool: SqlitePool, world_config: WorldConfig) -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
-            base_path,
+            pool,
             world_config,
         }
     }
 
-    pub(crate) fn base_path(&self) -> &Path {
-        &self.base_path
+    #[allow(dead_code)]
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
     pub(crate) async fn get_or_create_world(&self, player_id: &str) -> Arc<RwLock<GameState>> {
@@ -50,13 +51,13 @@ impl WorldManager {
             return entry.state.clone();
         }
 
-        let state = if let Some(loaded) = load_player_world(&self.base_path, player_id).await {
+        let state = if let Some(loaded) = crate::persistence::load_player_world(&self.pool, player_id).await {
             Arc::new(RwLock::new(loaded))
         } else {
             let fresh = new_pve(player_id, self.world_config);
             let arc = Arc::new(RwLock::new(fresh));
             if let Ok(guard) = arc.try_read() {
-                let _ = save_player_world(&self.base_path, player_id, &guard).await;
+                let _ = crate::persistence::save_player_world(&self.pool, player_id, &guard).await;
             }
             arc
         };
@@ -81,33 +82,12 @@ impl WorldManager {
     }
 
     pub(crate) async fn list_saved_player_ids(&self) -> Vec<String> {
-        let mut rd = match tokio::fs::read_dir(&self.base_path).await {
-            Ok(rd) => rd,
-            Err(_) => return vec![],
-        };
-        let mut ids = Vec::new();
-        while let Ok(Some(entry)) = rd.next_entry().await {
-            let Ok(ft) = entry.file_type().await else {
-                continue;
-            };
-            if !ft.is_dir() {
-                continue;
-            }
-            let Ok(name) = entry.file_name().into_string() else {
-                continue;
-            };
-            let path = world_path(&self.base_path, &name);
-            if tokio::fs::try_exists(&path).await.unwrap_or(false) {
-                ids.push(name);
-            }
-        }
-        ids.sort();
-        ids
+        world_repo::list_pve_world_ids(&self.pool).await
     }
 
     /// メモリ未ロードの保存ワールドに、バックグラウンド処理対象の到着済み遠征があるか（帰還除く）
     pub(crate) async fn saved_world_has_due_outbound_marches(&self, player_id: &str) -> bool {
-        let Some(state) = load_player_world(&self.base_path, player_id).await else {
+        let Some(state) = crate::persistence::load_player_world(&self.pool, player_id).await else {
             return false;
         };
         let now = crate::model::default_now_ms();
@@ -132,7 +112,7 @@ impl WorldManager {
     }
 
     pub(crate) async fn save_world(&self, player_id: &str, state: &GameState) {
-        let _ = save_player_world(&self.base_path, player_id, state).await;
+        let _ = crate::persistence::save_player_world(&self.pool, player_id, state).await;
     }
 
     pub(crate) async fn broadcast(&self, player_id: &str, json: String) {

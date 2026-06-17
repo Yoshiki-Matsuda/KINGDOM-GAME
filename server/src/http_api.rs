@@ -9,7 +9,8 @@ use crate::{
     app_state::{AppState, GameStore},
     auth::{self, AuthRequest, AuthResponse},
     model::{client_view_state, GameState},
-    persistence::save_state,
+    persistence,
+    db::world_repo,
 };
 
 #[derive(Serialize)]
@@ -66,7 +67,7 @@ pub(crate) async fn auth_register(
         GameStore::Shared(game) => {
             let mut game = game.write().await;
             let response = auth::register(
-                &state.auth_path,
+                &state.db_pool,
                 &state.jwt_secret,
                 server_mode,
                 Some(&mut game),
@@ -74,14 +75,14 @@ pub(crate) async fn auth_register(
             )
             .await
             .map_err(bad_request)?;
-            save_state(&state.state_path, &game).await.map_err(server_error)?;
+            persistence::save_state(&state.db_pool, state.pvp_world_id(), "pvp", &game).await.map_err(server_error)?;
             let json =
                 serde_json::to_string(&*game).unwrap_or_else(|_| r#"{"error":"serialize"}"#.to_string());
             state.broadcast_json(None, json);
             response
         }
         GameStore::PerPlayer(_) => {
-            auth::register(&state.auth_path, &state.jwt_secret, server_mode, None, req)
+            auth::register(&state.db_pool, &state.jwt_secret, server_mode, None, req)
                 .await
                 .map_err(bad_request)?
         }
@@ -99,7 +100,7 @@ pub(crate) async fn auth_login(
         GameStore::Shared(game) => {
             let mut game = game.write().await;
             let response = auth::login(
-                &state.auth_path,
+                &state.db_pool,
                 &state.jwt_secret,
                 server_mode,
                 Some(&mut game),
@@ -107,14 +108,14 @@ pub(crate) async fn auth_login(
             )
             .await
             .map_err(unauthorized)?;
-            save_state(&state.state_path, &game).await.map_err(server_error)?;
+            persistence::save_state(&state.db_pool, state.pvp_world_id(), "pvp", &game).await.map_err(server_error)?;
             let json =
                 serde_json::to_string(&*game).unwrap_or_else(|_| r#"{"error":"serialize"}"#.to_string());
             state.broadcast_json(None, json);
             response
         }
         GameStore::PerPlayer(_) => {
-            auth::login(&state.auth_path, &state.jwt_secret, server_mode, None, req)
+            auth::login(&state.db_pool, &state.jwt_secret, server_mode, None, req)
                 .await
                 .map_err(unauthorized)?
         }
@@ -133,6 +134,7 @@ pub(crate) async fn auth_exchange(
         GameStore::Shared(game) => {
             let mut game = game.write().await;
             let response = auth::exchange_token(
+                &state.db_pool,
                 &state.jwt_secret,
                 server_mode,
                 Some(&mut game),
@@ -140,14 +142,14 @@ pub(crate) async fn auth_exchange(
             )
             .await
             .map_err(bad_request)?;
-            save_state(&state.state_path, &game).await.map_err(server_error)?;
+            persistence::save_state(&state.db_pool, state.pvp_world_id(), "pvp", &game).await.map_err(server_error)?;
             let json =
                 serde_json::to_string(&*game).unwrap_or_else(|_| r#"{"error":"serialize"}"#.to_string());
             state.broadcast_json(None, json);
             response
         }
         GameStore::PerPlayer(_) => {
-            auth::exchange_token(&state.jwt_secret, server_mode, None, token)
+            auth::exchange_token(&state.db_pool, &state.jwt_secret, server_mode, None, token)
                 .await
                 .map_err(bad_request)?
         }
@@ -220,7 +222,8 @@ pub(crate) async fn admin_wipe(
                 let mut game = game.write().await;
                 *game = new_state.clone();
             }
-            save_state(&state.state_path, &new_state).await.map_err(server_error)?;
+            let _ = world_repo::delete_world(&state.db_pool, state.pvp_world_id()).await;
+            persistence::save_state(&state.db_pool, state.pvp_world_id(), "pvp", &new_state).await.map_err(server_error)?;
             state.broadcast_json(
                 None,
                 serde_json::to_string(&new_state).unwrap_or_default(),

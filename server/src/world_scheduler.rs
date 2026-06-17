@@ -2,7 +2,7 @@ use crate::{
     app_state::{AppState, GameStore},
     config,
     model::tick_world,
-    persistence::{save_player_world, save_state},
+    persistence,
 };
 
 pub(crate) fn spawn_world_scheduler(state: AppState) {
@@ -20,7 +20,7 @@ pub(crate) fn spawn_world_scheduler(state: AppState) {
                         let _guard = state.mutation_lock.lock().await;
                         let mut game = game.write().await;
                         tick_world(&mut game, dev_auto_win, server_mode);
-                        let _ = save_state(&state.state_path, &game).await;
+                        let _ = persistence::save_state(&state.db_pool, state.pvp_world_id(), "pvp", &game).await;
                     }
                     let game = game.read().await;
                     state.broadcast_json(
@@ -37,8 +37,7 @@ pub(crate) fn spawn_world_scheduler(state: AppState) {
                             let _guard = state.mutation_lock.lock().await;
                             let mut game = world.write().await;
                             tick_world(&mut game, dev_auto_win, server_mode);
-                            let _ =
-                                save_player_world(mgr.base_path(), &player_id, &game).await;
+                            let _ = persistence::save_player_world(&state.db_pool, &player_id, &game).await;
                         }
                         let game = world.read().await;
                         mgr.broadcast(

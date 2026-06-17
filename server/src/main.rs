@@ -10,6 +10,7 @@ mod ai_kingdom_scheduler;
 mod app_state;
 mod auth;
 mod config;
+mod db;
 mod dev_bot;
 mod game_log;
 mod cards;
@@ -34,11 +35,9 @@ use axum::{routing::{get, post}, Router};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 use app_state::{AppState, GameStore};
+use db::world_repo;
 use model::{cleanup_expired_ruins, ensure_player_in_game, GameState, TEST_PLAYER_IDS, WorldConfig};
 use paths::project_root;
-use persistence::{
-    auth_path, load_state, migrate_legacy_pvp_state, save_state, state_path_for_mode,
-};
 use server_mode::ServerMode;
 use world_manager::{spawn_world_eviction, WorldManager};
 use world_scheduler::spawn_world_scheduler;
@@ -48,35 +47,33 @@ use march_scheduler::spawn_march_scheduler;
 async fn main() {
     let server_mode = ServerMode::from_env();
     let world_config = WorldConfig::from_env();
-    let state_path = state_path_for_mode(server_mode);
-    let auth_path = auth_path();
+
     println!(
         "[kingdom-server] project_root={}",
         project_root().display()
     );
 
-    if server_mode == ServerMode::Pvp {
-        migrate_legacy_pvp_state(&state_path).await;
-    }
+    // DB接続（SQLite）
+    let database_url = config::database_url();
+    println!("[kingdom-server] DATABASE_URL={}", database_url);
+    let pool = db::create_pool(&database_url).await.unwrap_or_else(|e| {
+        eprintln!("[kingdom-server] DB接続失敗: {e}");
+        std::process::exit(1);
+    });
 
     let store = match server_mode {
         ServerMode::Pvp => {
-            let mut game = match load_state(&state_path).await {
+            let pvp_id = world_repo::pvp_world_id();
+            let mut game = match persistence::load_state(&pool, pvp_id).await {
                 Some(loaded) => {
-                    println!(
-                        "[kingdom-server] PVP保存済み状態を読み込みました: {}",
-                        state_path.display()
-                    );
+                    println!("[kingdom-server] PVP保存済み状態を読み込みました(DB)");
                     loaded
                 }
                 None => {
                     let mut default = GameState::default();
                     default.world = world_config;
-                    let _ = save_state(&state_path, &default).await;
-                    println!(
-                        "[kingdom-server] PVP新規ゲームを初期化: {}",
-                        state_path.display()
-                    );
+                    let _ = persistence::save_state(&pool, pvp_id, "pvp", &default).await;
+                    println!("[kingdom-server] PVP新規ゲームを初期化(DB)");
                     default
                 }
             };
@@ -92,30 +89,24 @@ async fn main() {
                 }
             }
             model::refresh_all_test_players(&mut game);
-            let _ = save_state(&state_path, &game).await;
+            let _ = persistence::save_state(&pool, pvp_id, "pvp", &game).await;
 
             if cleanup_expired_ruins(&mut game) {
-                let _ = save_state(&state_path, &game).await;
+                let _ = persistence::save_state(&pool, pvp_id, "pvp", &game).await;
                 println!("[kingdom-server] 期限切れの遺跡をクリーンアップしました");
             }
 
             GameStore::Shared(Arc::new(RwLock::new(game)))
         }
         ServerMode::Pve => {
-            if let Some(parent) = state_path.parent() {
-                let _ = tokio::fs::create_dir_all(parent).await;
-            }
-            println!(
-                "[kingdom-server] PVEモード: ワールドは接続時に生成 ({})",
-                state_path.display()
-            );
-            let mgr = Arc::new(WorldManager::new(state_path.clone(), world_config));
+            println!("[kingdom-server] PVEモード: ワールドは接続時に生成(DB)");
+            let mgr = Arc::new(WorldManager::new(pool.clone(), world_config));
             spawn_world_eviction(mgr.clone());
             GameStore::PerPlayer(mgr)
         }
     };
 
-    if let Err(e) = auth::ensure_dev_auth_users(&auth_path).await {
+    if let Err(e) = auth::ensure_dev_auth_users(&pool).await {
         eprintln!("[kingdom-server] テスト用アカウントの初期化に失敗: {e}");
         std::process::exit(1);
     }
@@ -139,8 +130,7 @@ async fn main() {
         store,
         mutation_lock: Arc::new(Mutex::new(())),
         broadcast_tx,
-        state_path,
-        auth_path,
+        db_pool: pool,
         jwt_secret: Arc::new(jwt_secret),
         dev_auto_win,
         world_config,
