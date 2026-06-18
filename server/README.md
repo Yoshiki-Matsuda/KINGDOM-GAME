@@ -254,6 +254,53 @@ Authorization: Bearer <JWTトークン>
 - `territories`・`market_listings`・`log` はマップ/市場/戦歴用に共有
 - サーバー内部の完全な `GameState` はメモリ上に保持（ブロードキャストチャネルはフル state、各クライアント送信時にフィルタ）
 
+### /admin/wipe（ワールド完全初期化）
+
+ワールドを完全にリセットし、新規ゲームとして再スタートします。**通常の再起動ではワイプは発生しません。**
+
+**前提条件:**
+- 管理者アカウント（既定: `admin` / `test12345`）でログイン済みであること
+- `ADMIN_PLAYER_ID`（既定 `admin`）と一致するプレイヤー ID の JWT を使用すること
+
+**PVP（共有ワールド）:**
+
+```powershell
+$jwt = (Invoke-RestMethod http://127.0.0.1:3000/auth/login -Method POST -ContentType 'application/json' -Body '{"username":"admin","password":"test12345"}').token
+Invoke-RestMethod http://127.0.0.1:3000/admin/wipe -Method POST -ContentType 'application/json' -Headers @{Authorization="Bearer $jwt"} -Body '{"confirm":"WIPE"}'
+```
+
+**PVE（プレイヤー別ワールド）:**
+
+```powershell
+$jwt = (Invoke-RestMethod http://127.0.0.1:3001/auth/login -Method POST -ContentType 'application/json' -Body '{"username":"offline_test","password":"test12345"}').token
+# ランダム地形
+Invoke-RestMethod http://127.0.0.1:3001/admin/wipe -Method POST -ContentType 'application/json' -Headers @{Authorization="Bearer $jwt"} -Body '{"confirm":"WIPE"}'
+# 地形シード固定（再現性あり）
+Invoke-RestMethod http://127.0.0.1:3001/admin/wipe -Method POST -ContentType 'application/json' -Headers @{Authorization="Bearer $jwt"} -Body '{"confirm":"WIPE","terrain_seed":12345}'
+```
+
+**リクエストボディ:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `confirm` | `string` | ✅ | 必ず `"WIPE"` を指定 |
+| `terrain_seed` | `u64` | — | 地形生成シード（PVE のみ有効。省略時はランダム） |
+
+**動作の違い:**
+
+| モード | 対象 | 挙動 |
+|--------|------|------|
+| PVP | 共有ワールド全体 | DB データ削除 → 再作成 → 全接続クライアントへ新状態ブロードキャスト |
+| PVE | リクエストした管理者のワールド | DB データ削除 → 再作成（他プレイヤーのワールドは影響なし） |
+
+**エラー:**
+
+| ステータス | 原因 |
+|-----------|------|
+| `401` | JWT トークンが無効または未提供 |
+| `403` | 管理者権限なし（`ADMIN_PLAYER_ID` と不一致） |
+| `400` | `confirm` に `"WIPE"` が指定されていない |
+
 ---
 
 ## WebSocket（`/ws`）

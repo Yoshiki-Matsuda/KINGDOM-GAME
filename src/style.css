@@ -870,6 +870,8 @@ body.login-active #app {
   z-index: 300;
   background: rgba(10, 10, 15, 0.9);
   display: flex;
+  align-items: center;
+  justify-content: center;
   animation: fadeIn 0.2s ease-out;
 }
 

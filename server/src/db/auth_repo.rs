@@ -57,9 +57,15 @@ pub(crate) async fn ensure_dev_users(
         if find_user_by_username(pool, username).await.is_some() {
             continue;
         }
+        // offline_test は ADMIN_PLAYER_ID と同じ player_id を持ち、管理権限を持つ
+        let player_id = if username == "offline_test" {
+            crate::config::admin_player_id()
+        } else {
+            username.to_string()
+        };
         let user = DbAuthUser {
             username: username.to_string(),
-            player_id: username.to_string(),
+            player_id,
             password_hash: password_hash.to_string(),
         };
         insert_user(pool, &user).await.map_err(|e| e.to_string())?;
