@@ -735,7 +735,7 @@ pub fn generate_territories(
     out
 }
 
-/// `terrain_seed` 未記録の旧セーブを新ジェネレータで地形だけ再生成する
+#[cfg(test)]
 pub fn migrate_legacy_terrain(state: &mut GameState) -> bool {
     if state.world.terrain_seed != 0 {
         return false;

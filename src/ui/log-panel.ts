@@ -337,7 +337,8 @@ function classifyLog(line: string): LogType {
     line.includes("攻撃失敗") ||
     line.includes("防衛に成功") ||
     line.includes("ターン経過") ||
-    line.includes("占領には至らなかった")
+    line.includes("占領には至らなかった") ||
+    line.includes("演習戦")
   ) {
     return "battle_end";
   }
@@ -799,8 +800,9 @@ function parseLogsToHistory(rawLogs: string[]): HistoryEntry[] {
       }
       const isVictory = viewingAsDefender
         ? line.includes("攻撃失敗") || line.includes("防衛に成功")
-        : line.includes("占領しました");
+        : line.includes("占領しました") || line.includes("演習戦に勝利");
       const isPartialOcc = line.includes("占領には至らなかった");
+      const isPracticeBattle = line.includes("演習戦");
       if (viewingAsDefender && line.includes("占領しました")) {
         currentBattle.result = "defeat";
       } else if (isVictory) {
@@ -816,11 +818,13 @@ function parseLogsToHistory(rawLogs: string[]): HistoryEntry[] {
             : isPartialOcc
               ? "防衛（部分）"
               : "防衛失敗"
-          : isVictory
-            ? "占領成功"
-            : isPartialOcc
-              ? "敵撃破・未占領"
-              : "攻撃失敗",
+          : isPracticeBattle
+            ? (isVictory ? "演習勝利" : "演習敗北")
+            : isVictory
+              ? "占領成功"
+              : isPartialOcc
+                ? "敵撃破・未占領"
+                : "攻撃失敗",
         icon: isVictory ? "🏆" : isPartialOcc ? "🛡️" : "💀",
         lines: [line],
       };

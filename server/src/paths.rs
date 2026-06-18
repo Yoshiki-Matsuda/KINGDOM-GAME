@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(test)]
+use std::path::Path;
 
 /// リポジトリルート（`server/` の親ディレクトリ）。
 /// `cargo run` のカレントディレクトリがルートでも `server/` でも同じ `data/` を指す。
@@ -10,6 +12,7 @@ pub(crate) fn project_root() -> PathBuf {
 }
 
 /// 相対パスは `project_root` 基準。絶対パスはそのまま使う。
+#[cfg(test)]
 pub(crate) fn resolve_project_path(path: impl AsRef<Path>) -> PathBuf {
     let path = path.as_ref();
     if path.is_absolute() {

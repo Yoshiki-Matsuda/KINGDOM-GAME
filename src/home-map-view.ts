@@ -49,9 +49,12 @@ export async function initHomeMapView(
         width: 500, 
         height: 350, 
         backgroundColor: 0x0a0a0f,
-        resolution: window.devicePixelRatio || 1,
+        resolution: 1,
         autoDensity: true,
+        antialias: false,
     });
+    // 自動レンダリングを停止（手動で app.render() を呼ぶ）
+    app.ticker.stop();
 
     container.appendChild(app.canvas as HTMLCanvasElement);
     _app = app;
@@ -185,4 +188,7 @@ function renderHomeGrid() {
             }
         }
     }
+
+    // 手動レンダリング
+    _app.render();
 }

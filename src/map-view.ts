@@ -316,6 +316,7 @@ export function wakeMapView(
     _visible = true;
     updateMapView(state, travelingDestinations);
     tryApplyHomeFocus();
+    requestRender();
 }
 
 export function isMapViewReady(): boolean {
@@ -335,7 +336,9 @@ export async function initMapView(
     const initW = Math.max(container.clientWidth, 1);
     const initH = Math.max(container.clientHeight, 1);
     const app = new Application();
-    await app.init({ backgroundColor: 0x0a0a0f, width: initW, height: initH });
+    await app.init({ backgroundColor: 0x0a0a0f, width: initW, height: initH, antialias: false });
+    // 自動レンダリングを停止（必要な時のみ手動で app.render() を呼ぶ）
+    app.ticker.stop();
     // @ts-ignore
     container.appendChild(app.canvas || app.view);
 
@@ -385,6 +388,7 @@ export async function initMapView(
         _tileContainer.y = my - localY * newScale;
         _tileContainer.scale.set(newScale);
         scale = newScale;
+        requestRender();
     }, { passive: false });
 
     // ドラッグ
@@ -409,6 +413,7 @@ export async function initMapView(
             const dy = e.global.y - dragStart.y;
             _tileContainer.x = containerStart.x + dx;
             _tileContainer.y = containerStart.y + dy;
+            requestRender();
         }
     });
 
@@ -447,6 +452,7 @@ function syncMapRendererSize(container: HTMLElement): void {
     if (w > 0 && h > 0) {
         _app.renderer.resize(w, h);
         _app.stage.hitArea = _app.screen;
+        requestRender();
     }
 }
 
@@ -657,6 +663,8 @@ function redrawTerrain() {
         const { points, id, t } = tileDrawData[i];
         strokeTerritoryBorder(borders, points, id, t, playerId);
     }
+
+    requestRender();
 }
 
 const ATTACK_FLAG_POLE_H = 14;
@@ -703,8 +711,14 @@ let _overlayTickerAdded = false;
 let _activeTravelPoolCount = 0;
 let _lastFlagTimerSec = -1;
 
+/** 手動レンダリング — 必要なタイミングでのみ app.render() を呼ぶ */
+function requestRender(): void {
+    if (_app && _visible) _app.render();
+}
+
 function attackLineBlinkAlpha(): number {
-    return 0.2 + 0.22 * (0.5 + 0.5 * Math.sin(Date.now() * 0.007));
+    // 1秒ごとに on/off を切り替える（GPU負荷を大幅削減）
+    return (Math.floor(Date.now() / 1000) % 2 === 0) ? 0.42 : 0.2;
 }
 
 function strokeDottedLine(
@@ -811,9 +825,12 @@ function updateMarchOverlayAnimation() {
 function ensureOverlayTicker() {
     if (!_app || _overlayTickerAdded) return;
     _overlayTickerAdded = true;
-    _app.ticker.add(() => {
+    // setIntervalで1秒ごとに更新（GPU負荷削減。tickerは初期化時に停止済み）
+    setInterval(() => {
+        if (!_visible) return;
         updateMarchOverlayAnimation();
-    });
+        requestRender();
+    }, 1000);
 }
 
 function redrawOverlay(travelingDestinations?: TravelingDestinationOverlay[]) {
@@ -905,4 +922,6 @@ function redrawOverlay(travelingDestinations?: TravelingDestinationOverlay[]) {
         _travelPool[i].bg.visible = false;
         _travelPool[i].text.visible = false;
     }
+
+    requestRender();
 }
