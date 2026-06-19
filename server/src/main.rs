@@ -12,7 +12,6 @@ mod auth;
 mod config;
 mod db;
 mod dev_bot;
-mod game_log;
 mod cards;
 mod facilities;
 mod http_api;
@@ -78,7 +77,6 @@ async fn main() {
                 }
             };
 
-            model::migrate_log_timestamps(&mut game);
             model::migrate_legacy_neutral_enemies(&mut game);
             let _ = crate::items::migrate_inventory_gold_to_resources(&mut game);
             for &player_id in TEST_PLAYER_IDS {

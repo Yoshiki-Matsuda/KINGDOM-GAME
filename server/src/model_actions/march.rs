@@ -5,7 +5,7 @@ use crate::server_mode::ServerMode;
 
 use super::*;
 
-use crate::model::{MarchKind, MarchMission};
+use crate::model::{MarchKind, MarchMission, push_actor_system_event, push_explore_complete_event, push_explore_dispatch_event, push_explore_level_up_event};
 
 /// KC準拠: 探索でスロットあたり加算される同時派遣数の閾値
 pub fn exploration_max_slots(exploration_level: u32) -> usize {
@@ -65,7 +65,7 @@ fn validate_march_dispatch(
     count: u32,
     owned_card_indices: &Option<Vec<usize>>,
     formed_unit_id: &Option<String>,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
 ) -> bool {
     let now = default_now_ms();
     if let Some(ref oci) = owned_card_indices {
@@ -73,39 +73,35 @@ fn validate_march_dispatch(
             let mut used = HashSet::new();
             for &i in oci {
                 if !used.insert(i) {
-                    push_actor_log(log, actor_player_id, "同じ魔獣を重複指定できません。".to_string());
+                    push_actor_system_event(log, actor_player_id, "同じ魔獣を重複指定できません。");
                     return false;
                 }
                 if i >= player.owned_cards.len() {
-                    push_actor_log(log, actor_player_id, "無効な魔獣スロットです。".to_string());
+                    push_actor_system_event(log, actor_player_id, "無効な魔獣スロットです。");
                     return false;
                 }
             }
             let locked = march_locked_card_slots(player, now);
             for &i in oci {
                 if locked.contains(&i) {
-                    push_actor_log(log, actor_player_id, "遠征中の魔獣を派遣できません。".to_string());
+                    push_actor_system_event(log, actor_player_id, "遠征中の魔獣を派遣できません。");
                     return false;
                 }
             }
             let away = march_bodies_away_count(player, now);
             let cap = player.owned_cards.len() as u32;
             if away.saturating_add(count) > cap {
-                push_actor_log(
-                    log,
-                    actor_player_id,
-                    format!(
+                push_actor_system_event(log, actor_player_id, &format!(
                         "本拠に残っている体数が足りません（遠征中{}体・今回{}体・上限{}体）。",
                         away, count, cap
-                    ),
-                );
+                    ));
                 return false;
             }
         }
     }
     if let Some(uid) = formed_unit_id {
         if march_busy_formed_unit_ids(player, now).contains(uid) {
-            push_actor_log(log, actor_player_id, "この編成は既に遠征中です。".to_string());
+            push_actor_system_event(log, actor_player_id, "この編成は既に遠征中です。");
             return false;
         }
     }
@@ -124,7 +120,7 @@ fn consume_stamina_for_march(
     player: &mut crate::model::PlayerData,
     card_indices: &[usize],
     cost: u32,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     dev_auto_win: bool,
 ) -> bool {
     ensure_stamina_vec(player);
@@ -132,16 +128,16 @@ fn consume_stamina_for_march(
     let mut used = HashSet::new();
     for &i in card_indices {
         if !used.insert(i) {
-            push_actor_log(log, actor_player_id, "同じ魔獣を重複指定できません。".to_string());
+            push_actor_system_event(log, actor_player_id, "同じ魔獣を重複指定できません。");
             return false;
         }
         if i >= player.owned_cards.len() {
-            push_actor_log(log, actor_player_id, "無効な魔獣スロットです。".to_string());
+            push_actor_system_event(log, actor_player_id, "無効な魔獣スロットです。");
             return false;
         }
         let rest_until = player.card_rest_until.get(i).copied().unwrap_or(0);
         if rest_until > now {
-            push_actor_log(log, actor_player_id, "休息中の魔獣を派遣できません。".to_string());
+            push_actor_system_event(log, actor_player_id, "休息中の魔獣を派遣できません。");
             return false;
         }
     }
@@ -151,7 +147,7 @@ fn consume_stamina_for_march(
     for &i in card_indices {
         let st = player.card_stamina.get(i).copied().unwrap_or(config::max_card_stamina());
         if st < cost {
-            push_actor_log(log, actor_player_id, "スタミナが足りない魔獣が含まれています。".to_string());
+            push_actor_system_event(log, actor_player_id, "スタミナが足りない魔獣が含まれています。");
             return false;
         }
     }
@@ -163,7 +159,7 @@ fn consume_stamina_for_march(
 
 pub(super) fn apply_start_march(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     dev_auto_win: bool,
     kind: MarchKind,
@@ -185,48 +181,44 @@ pub(super) fn apply_start_march(
     };
 
     if count == 0 {
-        push_actor_log(log, actor_player_id, "出撃する体がありません。".to_string());
+        push_actor_system_event(log, actor_player_id, "出撃する体がありません。");
         return state.clone();
     }
 
     let from_idx = get_territory_index(&state.territories, from_territory_id);
     let to_idx = get_territory_index(&state.territories, to_territory_id);
     if from_idx.is_none() || to_idx.is_none() {
-        push_actor_log(log, actor_player_id, "無効な領地です。".to_string());
+        push_actor_system_event(log, actor_player_id, "無効な領地です。");
         return state.clone();
     }
 
     if !territories_are_adjacent(from_territory_id, to_territory_id) {
-        push_actor_log(
-            log,
-            actor_player_id,
-            format!("{}と{}は隣接していません。", from_territory_id, to_territory_id),
-        );
+        push_actor_system_event(log, actor_player_id, &format!("{}と{}は隣接していません。", from_territory_id, to_territory_id));
         return state.clone();
     }
 
     match kind {
         MarchKind::Attack => {
             if is_home_territory(to_territory_id) {
-                push_actor_log(log, actor_player_id, "本拠地は攻撃できません。".to_string());
+                push_actor_system_event(log, actor_player_id, "本拠地は攻撃できません。");
                 return state.clone();
             }
             let base_owners = attack_base_owner_ids(state, actor_player_id);
             if !is_attackable_target(&state.territories, to_territory_id, &base_owners) {
-                push_actor_log(log, actor_player_id, "攻撃できない領地です。".to_string());
+                push_actor_system_event(log, actor_player_id, "攻撃できない領地です。");
                 return state.clone();
             }
             let from_owner = state.territories[from_idx.unwrap()]
                 .owner_id
                 .as_deref();
             if from_owner != Some(actor_player_id) {
-                push_actor_log(log, actor_player_id, "自領からのみ攻撃できます。".to_string());
+                push_actor_system_event(log, actor_player_id, "自領からのみ攻撃できます。");
                 return state.clone();
             }
             let oci = match owned_card_indices {
                 Some(v) if v.len() == count as usize => v,
                 _ => {
-                    push_actor_log(log, actor_player_id, "攻撃には編成スロット情報が必要です。".to_string());
+                    push_actor_system_event(log, actor_player_id, "攻撃には編成スロット情報が必要です。");
                     return state.clone();
                 }
             };
@@ -249,40 +241,36 @@ pub(super) fn apply_start_march(
                 .owner_id
                 .as_deref();
             if to_owner != Some(actor_player_id) {
-                push_actor_log(log, actor_player_id, "自領地のみ探索できます。".to_string());
+                push_actor_system_event(log, actor_player_id, "自領地のみ探索できます。");
                 return state.clone();
             }
             if to_territory_id == player.home_territory_id.as_str() {
-                push_actor_log(log, actor_player_id, "本拠地からは探索を派遣しません。".to_string());
+                push_actor_system_event(log, actor_player_id, "本拠地からは探索を派遣しません。");
                 return state.clone();
             }
             if state.territories[to_idx.unwrap()].is_base {
-                push_actor_log(log, actor_player_id, "拠点や塔からは探索を派遣できません。".to_string());
+                push_actor_system_event(log, actor_player_id, "拠点や塔からは探索を派遣できません。");
                 return state.clone();
             }
             let oci = match owned_card_indices {
                 Some(v) if !v.is_empty() && v.len() == count as usize => v,
                 _ => {
-                    push_actor_log(log, actor_player_id, "探索に使用する魔獣を選んでください。".to_string());
+                    push_actor_system_event(log, actor_player_id, "探索に使用する魔獣を選んでください。");
                     return state.clone();
                 }
             };
             let max_slots = exploration_max_slots(player.exploration_level);
             if oci.len() > max_slots {
-                push_actor_log(
-                    log,
-                    actor_player_id,
-                    format!(
+                push_actor_system_event(log, actor_player_id, &format!(
                         "同時派遣数が探索レベル({}体まで)を超えています。",
                         max_slots
-                    ),
-                );
+                    ));
                 return state.clone();
             }
             let now = default_now_ms();
             let active_explore_bodies = active_explore_bodies_in_flight(player, now);
             if active_explore_bodies + oci.len() > max_slots {
-                push_actor_log(log, actor_player_id, "これ以上探索を出せません。".to_string());
+                push_actor_system_event(log, actor_player_id, "これ以上探索を出せません。");
                 return state.clone();
             }
             if !validate_march_dispatch(player, actor_player_id, count, owned_card_indices, formed_unit_id, log) {
@@ -301,13 +289,13 @@ pub(super) fn apply_start_march(
         }
         MarchKind::Deploy => {
             if is_home_territory(to_territory_id) {
-                push_actor_log(log, actor_player_id, "本拠地へ援軍は不要です。".to_string());
+                push_actor_system_event(log, actor_player_id, "本拠地へ援軍は不要です。");
                 return state.clone();
             }
             let allied = player.allied_player_ids.clone();
             if !can_receive_reinforcement(&state.territories, actor_player_id, &allied, to_territory_id)
             {
-                push_actor_log(log, actor_player_id, "援軍を送れない領地です。".to_string());
+                push_actor_system_event(log, actor_player_id, "援軍を送れない領地です。");
                 return state.clone();
             }
             if !validate_march_dispatch(player, actor_player_id, count, owned_card_indices, formed_unit_id, log) {
@@ -315,7 +303,7 @@ pub(super) fn apply_start_march(
             }
         }
         MarchKind::Return => {
-            push_actor_log(log, actor_player_id, "帰還は自動生成されます。".to_string());
+            push_actor_system_event(log, actor_player_id, "帰還は自動生成されます。");
             return state.clone();
         }
     }
@@ -364,20 +352,25 @@ pub(super) fn apply_start_march(
     });
 
     let dispatch_msg = match kind {
-        MarchKind::Explore => format!("探索を{}へ派遣しました。", to_name),
-        _ => format!(
+        MarchKind::Explore => {
+            push_explore_dispatch_event(log, actor_player_id, &to_name, &format!("探索を{}へ派遣しました。", to_name));
+            None
+        }
+        _ => Some(format!(
             "{}を{}へ派遣しました（{}・到着まで約{}秒）。",
             label, to_name, label, travel_ms / 1000
-        ),
+        )),
     };
-    push_actor_log(log, actor_player_id, dispatch_msg);
+    if let Some(msg) = dispatch_msg {
+        push_actor_system_event(log, actor_player_id, &msg);
+    }
 
     build_game_state(state, state.territories.clone(), log.clone(), players)
 }
 
 pub fn apply_explore_arrival(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     march: &MarchMission,
 ) -> GameState {
@@ -441,23 +434,20 @@ pub fn apply_explore_arrival(
         player.exploration_level += 1;
         let lv = player.exploration_level;
         let slots = exploration_max_slots(lv);
-        push_actor_log(
-            log,
-            actor_player_id,
-            format!(
+        push_explore_level_up_event(log, actor_player_id, &format!(
                 "探索経験が溜まり、探索レベルが {} に上昇！同時派遣数{}体。",
                 lv, slots
-            ),
-        );
+            ));
     }
 
-    push_actor_log(
+    push_explore_complete_event(
         log,
         actor_player_id,
-        format!(
-            "{}の探索が完了。食料+{}・木+{}・石+{}・鉄+{}",
-            territory_label, food, wood, stone, iron
-        ),
+        &territory_label,
+        food,
+        wood,
+        stone,
+        iron,
     );
 
     build_game_state(state, state.territories.clone(), log.clone(), players)
@@ -500,7 +490,7 @@ fn maybe_spawn_return_march(
 
 pub fn tick_marches(
     state: &mut GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     dev_auto_win: bool,
     server_mode: ServerMode,
     include_returns: bool,
@@ -536,14 +526,10 @@ pub fn tick_marches(
 
         match march.kind {
             MarchKind::Return => {
-                push_actor_log(
-                    log,
-                    &player_id,
-                    format!(
+                push_actor_system_event(log, &player_id, &format!(
                         "{}が帰還しました。",
                         march.unit_name.as_deref().unwrap_or("遠征隊")
-                    ),
-                );
+                    ));
             }
             MarchKind::Attack => {
                 let to_id = march.to_territory_id.clone();
@@ -715,7 +701,7 @@ mod march_validation_tests {
         state = start_march_attack(&state, vec![1, 2], 2);
         let p = state.players.get(DEFAULT_PLAYER_ID).unwrap();
         assert_eq!(p.marches.len(), before_len);
-        assert!(state.log.iter().any(|l| l.contains("遠征中の魔獣")));
+        assert!(state.log.iter().any(|l| l.message.contains("遠征中の魔獣")));
     }
 
     #[test]
@@ -792,7 +778,7 @@ mod march_validation_tests {
             state
                 .log
                 .iter()
-                .any(|l| l.contains("遠征中の魔獣") || l.contains("既に遠征中"))
+                .any(|l| l.message.contains("遠征中の魔獣") || l.message.contains("既に遠征中"))
         );
     }
 
@@ -834,8 +820,8 @@ mod march_validation_tests {
         assert_eq!(p.marches.len(), before_len);
         assert!(
             state.log.iter().any(|l| {
-                l.contains("本拠に残っている体数が足りません")
-                    || l.contains("遠征中の魔獣")
+                l.message.contains("本拠に残っている体数が足りません")
+                    || l.message.contains("遠征中の魔獣")
             }),
             "log={:?}",
             state.log
@@ -886,7 +872,7 @@ mod march_validation_tests {
         );
         let p = state.players.get(DEFAULT_PLAYER_ID).unwrap();
         assert_eq!(p.resources.food, food_before);
-        assert!(state.log.iter().any(|l| l.contains("遠征中の魔獣は生産できません")));
+        assert!(state.log.iter().any(|l| l.message.contains("遠征中の魔獣は生産できません")));
     }
 
     fn owned_explore_target(state: &mut GameState) -> String {
@@ -942,7 +928,7 @@ mod march_validation_tests {
         state = start_march_explore(&state, &to, vec![0, 1, 2]);
         let p = state.players.get(DEFAULT_PLAYER_ID).unwrap();
         assert_eq!(p.marches.len(), before_len);
-        assert!(state.log.iter().any(|l| l.contains("同時派遣数が探索レベル")));
+        assert!(state.log.iter().any(|l| l.message.contains("同時派遣数が探索レベル")));
     }
 
     #[test]

@@ -13,6 +13,7 @@ use crate::cards::get_card;
 
 mod action;
 mod card_stats;
+mod game_event;
 mod player;
 mod progression;
 mod state;
@@ -23,6 +24,7 @@ mod world;
 
 pub use action::*;
 pub use card_stats::*;
+pub use game_event::*;
 pub use player::*;
 pub use progression::*;
 pub use state::*;

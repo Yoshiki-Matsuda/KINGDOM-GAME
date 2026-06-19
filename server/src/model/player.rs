@@ -237,12 +237,6 @@ pub(crate) fn territory_name<'a>(territories: &'a [Territory], id: &'a str) -> &
     territories.iter().find(|t| t.id.as_str() == id).map(|t| t.name.as_str()).unwrap_or(id)
 }
 
-pub(crate) use crate::game_log::{push_actor_log, push_log};
-
-pub fn migrate_log_timestamps(state: &mut GameState) {
-    crate::game_log::migrate_log_timestamps(&mut state.log);
-}
-
 
 
 #[cfg(test)]

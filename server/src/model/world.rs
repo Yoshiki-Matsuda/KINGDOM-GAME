@@ -22,8 +22,8 @@ pub(crate) const TERRAIN_LEVEL_PERIL: u8 = 7;
 pub(crate) const TERRAIN_LEVEL_DEMON: u8 = 8;
 /// 深域タイルの領地レベル
 pub(crate) const TERRAIN_LEVEL_DEEP: u8 = 9;
-/// Lv3/Lv4 から山岳シードを置く確率（1.5%）
-const MOUNTAIN_SEED_CHANCE: (u32, u32) = (15, 1000);
+/// Lv3/Lv4 から山岳シードを置く確率（2.0%）
+const MOUNTAIN_SEED_CHANCE: (u32, u32) = (20, 1000);
 /// 山岳シードから隣接マスへ広がる確率（45%）
 const MOUNTAIN_SPREAD_CHANCE: (u32, u32) = (45, 100);
 /// 川セグメント（3マス）配置試行確率（2.5% / マス）
@@ -31,7 +31,7 @@ const RIVER_SEGMENT_CHANCE: (u32, u32) = (25, 1000);
 /// Lv7-9 パッチ確率（万分率、Lv9深域が最レア）
 const DEEP_TERRAIN_CHANCE_9: (u32, u32) = (12, 10000);
 const DEEP_TERRAIN_CHANCE_8: (u32, u32) = (35, 10000);
-const DEEP_TERRAIN_CHANCE_7: (u32, u32) = (100, 10000);
+const DEEP_TERRAIN_CHANCE_7: (u32, u32) = (70, 10000);
 
 /// 地形生成シードを解決（明示指定 > 環境変数 > ランダム）
 pub fn resolve_terrain_seed(explicit: Option<u64>) -> u64 {
@@ -89,7 +89,7 @@ fn spread_mountains(grid: &mut [Vec<u8>], cols: usize, rows: usize, rng: &mut St
     for row in 0..rows {
         for col in 0..cols {
             let level = grid[row][col];
-            if level == 3 && rng.gen_ratio(MOUNTAIN_SEED_CHANCE.0, MOUNTAIN_SEED_CHANCE.1) {
+            if (level == 3 || level == 4) && rng.gen_ratio(MOUNTAIN_SEED_CHANCE.0, MOUNTAIN_SEED_CHANCE.1) {
                 grid[row][col] = TERRAIN_LEVEL_MOUNTAIN;
             }
         }
@@ -117,6 +117,27 @@ fn spread_mountains(grid: &mut [Vec<u8>], cols: usize, rows: usize, rng: &mut St
             && rng.gen_ratio(MOUNTAIN_SPREAD_CHANCE.0, MOUNTAIN_SPREAD_CHANCE.1)
         {
             grid[row][col] = TERRAIN_LEVEL_ALPINE;
+        }
+    }
+    // Mountain clustering: existing mountains can grow into adjacent tiles
+    let mountains: Vec<(usize, usize)> = (0..rows)
+        .flat_map(|r| (0..cols).map(move |c| (r, c)))
+        .filter(|&(r, c)| grid[r][c] == TERRAIN_LEVEL_MOUNTAIN)
+        .collect();
+    for (row, col) in mountains {
+        if rng.gen_ratio(40, 100) {
+            let nbrs = neighbors4(row, col, rows, cols);
+            let candidates: Vec<(usize, usize)> = nbrs
+                .into_iter()
+                .filter(|&(nr, nc)| {
+                    grid[nr][nc] != TERRAIN_LEVEL_MOUNTAIN
+                        && grid[nr][nc] != TERRAIN_LEVEL_ALPINE
+                        && grid[nr][nc] != TERRAIN_LEVEL_RIVER
+                })
+                .collect();
+            if let Some(&(nr, nc)) = candidates.choose(rng) {
+                grid[nr][nc] = TERRAIN_LEVEL_MOUNTAIN;
+            }
         }
     }
 }

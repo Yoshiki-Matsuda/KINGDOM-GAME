@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::push_actor_system_event;
 
 const BUILD_TIME_FAST_5: [u64; 5] = [60, 180, 600, 1800, 3600];
 const BUILD_TIME_STORAGE_3: [u64; 3] = [60, 300, 900];
@@ -49,7 +50,7 @@ fn facility_build_costs(level: u8) -> Option<Vec<(&'static str, u32)>> {
 
 pub(super) fn apply_build_base(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     territory_id: &str,
 ) -> GameState {
@@ -75,7 +76,7 @@ pub(super) fn apply_build_base(
             || player.resources.stone < cost_stone
             || player.resources.iron < cost_iron
         {
-            push_log(log, "資源が足りません。".to_string());
+            push_system_event(log, "資源が足りません。");
             return state.clone();
         }
         player.resources.food -= cost_food;
@@ -89,7 +90,7 @@ pub(super) fn apply_build_base(
     territories[idx].durability = territories[idx].max_durability;
     territories[idx].tower_level = 1;
     let name = territory_name(&territories, territory_id).to_string();
-    push_log(log, format!("{}に前線基地を建設しました！", name));
+    push_system_event(log, &format!("{}に前線基地を建設しました！", name));
 
     build_game_state(state, territories, log.clone(), players)
 }
@@ -97,7 +98,7 @@ pub(super) fn apply_build_base(
 /// KC準拠: 施設建設/レベルアップ（拠点ごとに同時1件のみ建設可能）
 pub(super) fn apply_build_facility(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     facility_id: &str,
     level: u8,
@@ -105,11 +106,11 @@ pub(super) fn apply_build_facility(
 ) -> GameState {
     let now = default_now_ms();
     let Some(build_seconds) = facility_build_time_seconds(facility_id, level) else {
-        push_log(log, "施設IDまたはレベル指定が不正です。".to_string());
+        push_system_event(log, "施設IDまたはレベル指定が不正です。");
         return state.clone();
     };
     let Some(costs) = facility_build_costs(level) else {
-        push_log(log, "レベル指定が不正です。".to_string());
+        push_system_event(log, "レベル指定が不正です。");
         return state.clone();
     };
 
@@ -118,7 +119,7 @@ pub(super) fn apply_build_facility(
         return state.clone();
     };
     if !consume_inventory_costs(&mut player.inventory, &costs) {
-        push_log(log, "施設建設に必要な素材が足りません。".to_string());
+        push_system_event(log, "施設建設に必要な素材が足りません。");
         return state.clone();
     }
 
@@ -130,7 +131,7 @@ pub(super) fn apply_build_facility(
         .iter()
         .any(|f| f.build_complete_at.map(|t| t > now).unwrap_or(false));
     if has_building {
-        push_log(log, "既に建設中の施設があります（同時1件まで）。".to_string());
+        push_system_event(log, "既に建設中の施設があります（同時1件まで）。");
         return state.clone();
     }
 
@@ -139,13 +140,13 @@ pub(super) fn apply_build_facility(
     match facilities.iter_mut().find(|f| f.facility_id == facility_id) {
         Some(existing) => {
             if level <= existing.level {
-                push_log(log, "現在より高いレベルを指定してください。".to_string());
+                push_system_event(log, "現在より高いレベルを指定してください。");
                 return state.clone();
             }
             if let Some(requested_position) = position {
                 if let Some(existing_position) = existing.position {
                     if existing_position != *requested_position {
-                        push_log(log, "施設の配置座標が一致しません。".to_string());
+                        push_system_event(log, "施設の配置座標が一致しません。");
                         return state.clone();
                     }
                 } else {
@@ -154,14 +155,11 @@ pub(super) fn apply_build_facility(
             }
             existing.level = level;
             existing.build_complete_at = Some(build_complete_at);
-            push_log(
-                log,
-                format!("施設「{}」をLv{}へアップグレード開始。", facility_id, level),
-            );
+            push_system_event(log, &format!("施設「{}」をLv{}へアップグレード開始。", facility_id, level));
         }
         None => {
             let Some(position) = *position else {
-                push_log(log, "施設の配置座標を指定してください。".to_string());
+                push_system_event(log, "施設の配置座標を指定してください。");
                 return state.clone();
             };
             facilities.push(crate::model::BuiltFacility {
@@ -170,7 +168,7 @@ pub(super) fn apply_build_facility(
                 build_complete_at: Some(build_complete_at),
                 position: Some(position),
             });
-            push_log(log, format!("施設「{}」の建設を開始。", facility_id));
+            push_system_event(log, &format!("施設「{}」の建設を開始。", facility_id));
         }
     }
 

@@ -312,8 +312,7 @@ function findLatestProduceFeedback(bodySlot: number): string | null {
   const cardName = getBodyDisplayName(cardId);
   const logs = gameState.log ?? [];
   for (let i = logs.length - 1; i >= Math.max(0, logs.length - 8); i--) {
-    const raw = logs[i];
-    const line = raw.replace(/^\[ts:\d+\]/, "").replace(/^\[p:[^\]]+\]/, "");
+    const line = logs[i].message ?? "";
     if (line.includes("遠征中の魔獣は生産できません")) return line;
     if (line.includes("食料が足りません")) return line;
     if (line.includes("これ以上魔獣を生産できません")) return line;

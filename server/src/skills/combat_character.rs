@@ -270,18 +270,18 @@ impl CombatCharacter {
     }
 
     /// ターン経過処理（毒・炎上ダメージ、持続ターン減少）
-    pub fn process_turn_effects(&mut self, log: &mut Vec<String>) {
+    pub fn process_turn_effects(&mut self, log: &mut Vec<crate::model::GameEvent>) {
         let mut damage_taken = 0.0;
 
         for effect in &self.status_effects {
             match effect {
                 StatusEffect::Poison { damage, .. } => {
                     damage_taken += damage;
-                    crate::game_log::push_log(log, format!("  {}が毒で {:.0} ダメージ！", self.name, damage));
+                    crate::model::push_skill_effect_event(log, &format!("  {}が毒で {:.0} ダメージ！", self.name, damage));
                 }
                 StatusEffect::Burn { damage, .. } => {
                     damage_taken += damage;
-                    crate::game_log::push_log(log, format!("  {}が炎上で {:.0} ダメージ！", self.name, damage));
+                    crate::model::push_skill_effect_event(log, &format!("  {}が炎上で {:.0} ダメージ！", self.name, damage));
                 }
                 _ => {}
             }
@@ -291,7 +291,7 @@ impl CombatCharacter {
             self.current_monster_count -= damage_taken;
             if self.current_monster_count <= 0.0 {
                 self.is_alive = false;
-                crate::game_log::push_log(log, format!("  {}が状態異常で倒れた！", self.name));
+                crate::model::push_skill_effect_event(log, &format!("  {}が状態異常で倒れた！", self.name));
             }
         }
 

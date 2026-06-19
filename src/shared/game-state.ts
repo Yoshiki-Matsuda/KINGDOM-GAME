@@ -321,13 +321,23 @@ export interface AiFaction {
   color: number;
 }
 
+/** 構造化ゲームイベント */
+export interface GameEvent {
+  id: number;
+  timestamp: number;
+  actor_id?: string | null;
+  event_type: string;
+  data: Record<string, unknown>;
+  message: string;
+}
+
 export interface GameState {
   world?: WorldConfig;
   world_owner_id?: string | null;
   ai_factions?: AiFaction[];
   territories: Territory[];
   /** バックエンドで発生した行動ログ。ユーザーは閲覧のみ */
-  log: string[];
+  log: GameEvent[];
   /** 全プレイヤーのデータ（プレイヤーID -> PlayerData） */
   players: Record<string, PlayerData>;
   /** 同盟一覧 */

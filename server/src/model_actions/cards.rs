@@ -1,17 +1,18 @@
 use super::*;
+use crate::model::push_system_event;
 
 /// 魔獣1体あたりの食料コスト（生産）
 const FOOD_PER_MONSTER_PRODUCE: u64 = 2;
 
 pub(super) fn apply_produce_monsters(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     card_index: usize,
     amount: u32,
 ) -> GameState {
     if amount == 0 {
-        push_log(log, "生産量は1以上にしてください。".to_string());
+        push_system_event(log, "生産量は1以上にしてください。");
         return state.clone();
     }
     let mut players = state.players.clone();
@@ -20,12 +21,12 @@ pub(super) fn apply_produce_monsters(
     };
     ensure_card_monster_counts(player);
     if card_index >= player.owned_cards.len() {
-        push_log(log, "無効な魔獣スロットです。".to_string());
+        push_system_event(log, "無効な魔獣スロットです。");
         return state.clone();
     }
     let now = default_now_ms();
     if super::march::march_locked_card_slots(player, now).contains(&card_index) {
-        push_log(log, "遠征中の魔獣は生産できません。".to_string());
+        push_system_event(log, "遠征中の魔獣は生産できません。");
         return state.clone();
     }
     let card_id = player.owned_cards[card_index];
@@ -39,18 +40,15 @@ pub(super) fn apply_produce_monsters(
     let room = cap.saturating_sub(cur);
     let add = amount.min(room);
     if add == 0 {
-        push_log(
-            log,
-            format!(
+        push_system_event(log, &format!(
                 "これ以上魔獣を生産できません（1スロットあたり上限{}体）。",
                 cap
-            ),
-        );
+            ));
         return state.clone();
     }
     let food_cost = (add as u64).saturating_mul(FOOD_PER_MONSTER_PRODUCE);
     if player.resources.food < food_cost {
-        push_log(log, "食料が足りません。".to_string());
+        push_system_event(log, "食料が足りません。");
         return state.clone();
     }
     player.resources.food -= food_cost;
@@ -58,13 +56,10 @@ pub(super) fn apply_produce_monsters(
     let card_name = crate::cards::get_card(card_id)
         .map(|c| c.name.to_string())
         .unwrap_or_else(|| format!("魔獣#{}", card_id));
-    push_log(
-        log,
-        format!(
+    push_system_event(log, &format!(
             "「{}」に魔獣を{}体生産した（食料{}を消費）。",
             card_name, add, food_cost
-        ),
-    );
+        ));
 
     let mut territories = state.territories.clone();
     sync_home_territory_body_counts_from_player(&mut territories, player);
@@ -75,7 +70,7 @@ pub(super) fn apply_produce_monsters(
 /// KC準拠合成: 素材魔獣を消費してベース魔獣のスキルレベルアップ
 pub(super) fn apply_synthesize_card(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     base_idx: usize,
     material_indices: &[usize],
@@ -111,7 +106,7 @@ pub(super) fn apply_synthesize_card(
         (material_count as u8).min(9)
     };
 
-    push_log(log, format!(
+    push_system_event(log, &format!(
         "「{}」に素材{}枚を合成！スキルLv+{}",
         base_name, material_count, level_up
     ));
@@ -198,7 +193,7 @@ pub(super) fn apply_synthesize_card(
                 let mut rng = rand::thread_rng();
                 if rng.gen::<f32>() < 0.05 {
                     card_awakened[new_base_idx] = true;
-                    push_log(log, format!("★ {} が覚醒した！Lv99を超えて成長できる！", base_name));
+                    push_system_event(log, &format!("★ {} が覚醒した！Lv99を超えて成長できる！", base_name));
                 }
             }
         }
@@ -223,7 +218,7 @@ pub(super) fn apply_synthesize_card(
                 let prob = (0.10 + 0.05 * (same_material_count as f32 - 3.0)).min(0.50);
                 if rng.gen::<f32>() < prob {
                     card_enhanced[new_base_idx] = true;
-                    push_log(log, format!("★ {} は強化魔獣となった！（ステータス+10% / コスト-25%）", base_name));
+                    push_system_event(log, &format!("★ {} は強化魔獣となった！（ステータス+10% / コスト-25%）", base_name));
                 }
             }
         }

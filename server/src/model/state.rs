@@ -77,7 +77,7 @@ pub fn client_view_json(state: &GameState, viewer_id: &str, mode: crate::server_
 pub(crate) fn build_game_state(
     state: &GameState,
     territories: Vec<Territory>,
-    log: Vec<String>,
+    log: Vec<crate::model::GameEvent>,
     players: HashMap<String, PlayerData>,
 ) -> GameState {
     GameState {
@@ -368,7 +368,7 @@ pub fn check_season_end(state: &mut GameState) -> bool {
 
     state.alliances.clear();
 
-    push_log(&mut state.log, format!(
+    push_system_event(&mut state.log, &format!(
         "シーズン{}が終了しました！シーズン{}が開始されます。",
         old_season, old_season + 1
     ));
@@ -445,7 +445,7 @@ mod world_tick_tests {
         let p = state.players.get("p").unwrap();
         assert!(p.marches.is_empty());
         assert!(p.resources.food > food_before);
-        assert!(state.log.iter().any(|l| l.contains("確実成功")));
+        assert!(state.log.iter().any(|l| l.message.contains("探索が完了")));
     }
 
     #[test]

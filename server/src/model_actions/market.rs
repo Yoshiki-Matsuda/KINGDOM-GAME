@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::push_system_event;
 
 // ========== フリーマーケット ==========
 
@@ -13,19 +14,19 @@ fn calculate_market_fee(price: u64, facilities: &[crate::model::BuiltFacility]) 
 
 pub(super) fn apply_list_on_flea_market(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     item: &MarketItemType,
     price: u64,
 ) -> GameState {
     if price == 0 {
-        push_log(log, "価格は1以上に設定してください。".to_string());
+        push_system_event(log, "価格は1以上に設定してください。");
         return state.clone();
     }
 
     if let MarketItemType::Card { card_id } = item {
         if !crate::cards::card_has_illustration(*card_id) {
-            push_log(log, "この魔獣は出品できません。".to_string());
+            push_system_event(log, "この魔獣は出品できません。");
             return state.clone();
         }
     }
@@ -51,7 +52,7 @@ pub(super) fn apply_list_on_flea_market(
                         name
                     }
                     None => {
-                        push_log(log, "出品する魔獣を所持していません。".to_string());
+                        push_system_event(log, "出品する魔獣を所持していません。");
                         return state.clone();
                     }
                 }
@@ -68,7 +69,7 @@ pub(super) fn apply_list_on_flea_market(
                         format!("{}x{}", name, count)
                     }
                     _ => {
-                        push_log(log, "出品するアイテムが足りません。".to_string());
+                        push_system_event(log, "出品するアイテムが足りません。");
                         return state.clone();
                     }
                 }
@@ -82,7 +83,7 @@ pub(super) fn apply_list_on_flea_market(
                     _ => false,
                 };
                 if !has_enough || *amount == 0 {
-                    push_log(log, "出品する資源が足りません。".to_string());
+                    push_system_event(log, "出品する資源が足りません。");
                     return state.clone();
                 }
                 match resource_type.as_str() {
@@ -124,32 +125,32 @@ pub(super) fn apply_list_on_flea_market(
     }
     new_state.territories = territories;
 
-    push_log(log, format!("フリマに{}を{}Gで出品しました。", item_desc, price));
+    push_system_event(log, &format!("フリマに{}を{}Gで出品しました。", item_desc, price));
     new_state.log = log.clone();
     new_state
 }
 
 pub(super) fn apply_buy_from_flea_market(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     listing_id: &str,
 ) -> GameState {
     let listing_idx = state.market_listings.iter().position(|l| l.listing_id == listing_id);
     let Some(idx) = listing_idx else {
-        push_log(log, "出品が見つかりません。".to_string());
+        push_system_event(log, "出品が見つかりません。");
         return state.clone();
     };
     let listing = &state.market_listings[idx];
 
     if listing.seller_id == actor_player_id {
-        push_log(log, "自分の出品は購入できません。".to_string());
+        push_system_event(log, "自分の出品は購入できません。");
         return state.clone();
     }
 
     if let MarketItemType::Card { card_id } = &listing.item {
         if !crate::cards::card_has_illustration(*card_id) {
-            push_log(log, "この出品は購入できません。".to_string());
+            push_system_event(log, "この出品は購入できません。");
             return state.clone();
         }
     }
@@ -160,7 +161,7 @@ pub(super) fn apply_buy_from_flea_market(
     };
 
     if buyer.resources.gold < listing.price {
-        push_log(log, "ゴールドが足りません。".to_string());
+        push_system_event(log, "ゴールドが足りません。");
         return state.clone();
     }
 
@@ -226,7 +227,7 @@ pub(super) fn apply_buy_from_flea_market(
     }
     new_state.territories = territories;
 
-    push_log(log, format!(
+    push_system_event(log, &format!(
         "フリマで{}を{}Gで購入（手数料{}G）",
         item_desc, listing.price, fee
     ));
@@ -236,18 +237,18 @@ pub(super) fn apply_buy_from_flea_market(
 
 pub(super) fn apply_cancel_flea_market_listing(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     listing_id: &str,
 ) -> GameState {
     let listing_idx = state.market_listings.iter().position(|l| l.listing_id == listing_id);
     let Some(idx) = listing_idx else {
-        push_log(log, "出品が見つかりません。".to_string());
+        push_system_event(log, "出品が見つかりません。");
         return state.clone();
     };
 
     if state.market_listings[idx].seller_id != actor_player_id {
-        push_log(log, "自分の出品のみ取り消せます。".to_string());
+        push_system_event(log, "自分の出品のみ取り消せます。");
         return state.clone();
     }
 
@@ -291,7 +292,7 @@ pub(super) fn apply_cancel_flea_market_listing(
     }
     new_state.territories = territories;
 
-    push_log(log, "出品を取り消しました。".to_string());
+    push_system_event(log, "出品を取り消しました。");
     new_state.log = log.clone();
     new_state
 }

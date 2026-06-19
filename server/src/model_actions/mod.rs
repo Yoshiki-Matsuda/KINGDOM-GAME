@@ -23,6 +23,8 @@ use formation::*;
 use march::*;
 use market::*;
 
+use crate::model::push_system_event;
+
 use crate::model::{
     attack_base_owner_ids,
     build_game_state,
@@ -39,8 +41,6 @@ use crate::model::{
     territories_are_adjacent,
     is_home_territory,
     parse_territory_coords,
-    push_actor_log,
-    push_log,
     sync_home_territory_body_counts_from_player,
     territory_name,
     wave_count_for_level,
@@ -48,6 +48,7 @@ use crate::model::{
     CardStatBonuses,
     CardStats,
     FacilityPosition,
+    GameEvent,
     GameState,
     MarketItemType,
     MarketListing,
@@ -77,7 +78,7 @@ pub(crate) fn apply_action(
     if server_mode == ServerMode::Pve {
         if let Some(msg) = validate_pve_action(state, actor_player_id, action) {
             let mut log = state.log.clone();
-            push_log(&mut log, msg);
+            push_system_event(&mut log, &msg);
             return build_game_state(
                 state,
                 state.territories.clone(),

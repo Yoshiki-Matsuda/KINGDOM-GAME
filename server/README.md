@@ -265,7 +265,7 @@ Authorization: Bearer <JWTトークン>
 **PVP（共有ワールド）:**
 
 ```powershell
-$jwt = (Invoke-RestMethod http://127.0.0.1:3000/auth/login -Method POST -ContentType 'application/json' -Body '{"username":"admin","password":"test12345"}').token
+$jwt = (Invoke-RestMethod http://127.0.0.1:3000/auth/login -Method POST -ContentType 'application/json' -Body '{"username":"offline_test","password":"test12345"}').token
 Invoke-RestMethod http://127.0.0.1:3000/admin/wipe -Method POST -ContentType 'application/json' -Headers @{Authorization="Bearer $jwt"} -Body '{"confirm":"WIPE"}'
 ```
 
@@ -494,4 +494,15 @@ npm run dev
 - 状態更新は純粋関数 `apply_action` が権威
 - 戦闘内ターン（`turn_order_speed` 等）と、旧ゲーム全体ターン（`end_turn` / `GameState.turn`）は別概念。後者は削除済み
 - バックグラウンド定数: `WORLD_TICK_SEC=60`, `FACILITY_RESOURCE_TICK_SEC=600`, `AI_TICK_INTERVAL_SEC=10`, 遺跡スポーンは `tick_ruins` 内（最大3、30%）
-- PostgreSQL / Redis 連携は将来拡張（`migrations/` にスケルトンあり）
+- SQLite DB: `kingdom.db`（リポジトリルートに自動作成）
+- マイグレーション: `server/migrations/` 内の `.sql` を番号順に手動実行
+
+```powershell
+# リポジトリルートから実行（PowerShellでは Get-Content + パイプを使用）
+Get-Content server/migrations/002_sqlite_normalized.sql | sqlite3 kingdom.db
+Get-Content server/migrations/003_event_logs.sql | sqlite3 kingdom.db
+```
+
+**注意:** `003_event_logs.sql` は `game_logs` テーブルを DROP します（ワイプ前提）。既存ログは失われるため、本番環境では実行前にバックアップを取ってください。
+
+- PostgreSQL / Redis 連携は将来拡張

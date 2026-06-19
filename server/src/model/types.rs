@@ -425,7 +425,7 @@ pub struct GameState {
     pub territories: Vec<Territory>,
     /// バックエンドで発生した行動のログ。ユーザーはこれを読むだけ。
     #[serde(default)]
-    pub log: Vec<String>,
+    pub log: Vec<crate::model::GameEvent>,
     /// 全プレイヤーのデータ（プレイヤーID -> PlayerData）
     pub players: HashMap<String, PlayerData>,
     /// 同盟一覧（KC準拠: 複数プレイヤーが同盟を結成）

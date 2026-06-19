@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use rand::seq::SliceRandom;
 use rand::Rng;
 
-use crate::game_log::push_log;
+use crate::model::{push_skill_event, push_skill_effect_event};
 
 use super::catalog::*;
 use super::combat_character::*;
@@ -60,7 +60,7 @@ pub(crate) fn side_label(is_ally: bool) -> &'static str {
 }
 
 fn log_skill_trigger(
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
     prefix: &str,
     is_ally: bool,
     character_name: &str,
@@ -68,30 +68,14 @@ fn log_skill_trigger(
     is_unique: bool,
 ) {
     let side = side_label(is_ally);
-    if is_unique {
-        push_log(
-            log,
-            format!(
-                "{} {} {}の固有スキル「{}」が発動！",
-                prefix, side, character_name, skill_name
-            ),
-        );
-    } else {
-        push_log(
-            log,
-            format!(
-                "{} {} {}の「{}」が発動！",
-                prefix, side, character_name, skill_name
-            ),
-        );
-    }
+    push_skill_event(log, side, character_name, skill_name, is_unique, prefix);
 }
 
 /// KC準拠スタートアップフェーズ: 味方+敵を素早さ昇順で並べ、各自のスキルを自陣側に適用
 pub fn apply_battle_start_skills(
     allies: &mut [CombatCharacter],
     enemies: &mut [CombatCharacter],
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
 ) {
     let mut startup_order: Vec<(usize, bool, f32, Option<String>, Option<String>, u8)> = Vec::new();
     for c in allies.iter() {
@@ -184,7 +168,7 @@ pub fn apply_battle_start_skills(
 pub fn apply_attack_skills(
     attacker: &mut CombatCharacter,
     is_ally: bool,
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
 ) -> AttackModifiers {
     let mut modifiers = AttackModifiers::default();
 
@@ -268,16 +252,16 @@ impl AttackModifiers {
     }
 }
 
-fn log_character_effects(log: &mut Vec<String>, name: &str, parts: Vec<String>) {
+fn log_character_effects(log: &mut Vec<crate::model::GameEvent>, name: &str, parts: Vec<String>) {
     if !parts.is_empty() {
-        push_log(log, format!("  → {}: {}", name, parts.join("、")));
+        push_skill_effect_event(log, &format!("  → {}: {}", name, parts.join("、")));
     }
 }
 
 fn apply_effects_to_character(
     character: &mut CombatCharacter,
     effects: &[&SkillEffect],
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
 ) {
     let mut parts = Vec::new();
     let mut overflow = Vec::new();
@@ -288,7 +272,7 @@ fn apply_effects_to_character(
     }
     log_character_effects(log, &character.name, parts);
     for line in overflow {
-        push_log(log, line);
+        push_skill_effect_event(log, &line);
     }
 }
 
@@ -299,7 +283,7 @@ pub(crate) fn apply_skill_effects(
     allies: &mut [CombatCharacter],
     enemies: &mut [CombatCharacter],
     caster_on_allies: bool,
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
 ) {
     let (friend, foe): (&mut [CombatCharacter], &mut [CombatCharacter]) = if caster_on_allies {
         (allies, enemies)
@@ -389,14 +373,14 @@ pub(crate) fn apply_skill_effects(
 pub fn apply_effect_to_character(
     effect: &SkillEffect,
     character: &mut CombatCharacter,
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
 ) {
     let mut overflow = Vec::new();
     if let Some(detail) = apply_effect_to_character_core(effect, character, &mut overflow) {
         log_character_effects(log, &character.name, vec![detail]);
     }
     for line in overflow {
-        push_log(log, line);
+        push_skill_effect_event(log, &line);
     }
 }
 
@@ -657,33 +641,33 @@ fn apply_attack_effect(
     effect: &SkillEffect,
     attacker: &CombatCharacter,
     modifiers: &mut AttackModifiers,
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
 ) {
     match effect.effect_type {
         SkillEffectType::DamageMultiply => {
             modifiers.damage_multiplier *= effect.value;
-            push_log(log, format!("  → ダメージ x{:.1}倍", effect.value));
+            push_skill_effect_event(log, &format!("  → ダメージ x{:.1}倍", effect.value));
         }
         SkillEffectType::DamageAdd => {
             if effect.target == SkillTarget::EnemySingle && effect.value < 1.0 {
                 let bonus = attacker.intelligence as f32 * effect.value;
                 modifiers.damage_add += bonus;
-                push_log(log, format!("  → +{:.0} ダメージ（知力補正）", bonus));
+                push_skill_effect_event(log, &format!("  → +{:.0} ダメージ（知力補正）", bonus));
             } else {
                 let scaled = effect.value
                     * (attacker.intelligence as f32
                         / crate::model::REF_INTELLIGENCE as f32);
                 modifiers.damage_add += scaled;
-                push_log(log, format!("  → +{:.0} ダメージ", scaled));
+                push_skill_effect_event(log, &format!("  → +{:.0} ダメージ", scaled));
             }
         }
         SkillEffectType::ExtraAttack => {
             modifiers.extra_attacks += effect.value as u32;
-            push_log(log, "  → 追加攻撃発生！".to_string());
+            push_skill_effect_event(log, "  → 追加攻撃発生！");
         }
         SkillEffectType::Absorb => {
             modifiers.absorb_rate += effect.value;
-            push_log(log, format!("  → 与ダメージの{:.0}%を吸収", effect.value * 100.0));
+            push_skill_effect_event(log, &format!("  → 与ダメージの{:.0}%を吸収", effect.value * 100.0));
         }
         SkillEffectType::TrueDamage => {
             modifiers.ignore_defense = true;
@@ -693,26 +677,26 @@ fn apply_attack_effect(
                         / crate::model::REF_INTELLIGENCE as f32);
                 if effect.target == SkillTarget::EnemyAll {
                     modifiers.aoe_damage += scaled;
-                    push_log(log, format!("  → +{:.0} 全体固定ダメージ", scaled));
+                    push_skill_effect_event(log, &format!("  → +{:.0} 全体固定ダメージ", scaled));
                 } else {
                     modifiers.true_damage += scaled;
-                    push_log(log, format!("  → +{:.0} 固定ダメージ", scaled));
+                    push_skill_effect_event(log, &format!("  → +{:.0} 固定ダメージ", scaled));
                 }
             } else {
-                push_log(log, "  → 魔防無視".to_string());
+                push_skill_effect_event(log, "  → 魔防無視");
             }
         }
         SkillEffectType::PercentDamage => {
             modifiers.percent_damage += effect.value;
-            push_log(log, format!("  → +{:.0}% 割合ダメージ", effect.value * 100.0));
+            push_skill_effect_event(log, &format!("  → +{:.0}% 割合ダメージ", effect.value * 100.0));
         }
         SkillEffectType::Execute => {
             modifiers.execute_threshold = modifiers.execute_threshold.max(effect.value);
-            push_log(log, format!("  → HP{:.0}%以下の敵を即死", effect.value * 100.0));
+            push_skill_effect_event(log, &format!("  → HP{:.0}%以下の敵を即死", effect.value * 100.0));
         }
         SkillEffectType::MonsterCountSteal => {
             modifiers.monster_steal += effect.value;
-            push_log(log, format!("  → {:.0} 魔獣数奪取", effect.value));
+            push_skill_effect_event(log, &format!("  → {:.0} 魔獣数奪取", effect.value));
         }
         // 状態異常付与系は別途処理
         SkillEffectType::Poison | SkillEffectType::Burn | SkillEffectType::Freeze |
@@ -724,22 +708,22 @@ fn apply_attack_effect(
         // バフ系
         SkillEffectType::Shield => {
             modifiers.self_effects.push(effect.clone());
-            push_log(log, format!("  → シールド{:.0}付与", effect.value));
+            push_skill_effect_event(log, &format!("  → シールド{:.0}付与", effect.value));
         }
         SkillEffectType::AttackBuff => {
             modifiers.ally_effects.push(effect.clone());
-            push_log(log, format!("  → 味方に攻撃バフ+{:.0}%", effect.value * 100.0));
+            push_skill_effect_event(log, &format!("  → 味方に攻撃バフ+{:.0}%", effect.value * 100.0));
         }
         SkillEffectType::Heal => {
             modifiers.heal_effects.push(effect.clone());
-            push_log(log, format!("  → {:.0} 回復", effect.value));
+            push_skill_effect_event(log, &format!("  → {:.0} 回復", effect.value));
         }
         SkillEffectType::Cleanse | SkillEffectType::Dispel => {
             modifiers.self_effects.push(effect.clone());
         }
         SkillEffectType::Taunt => {
             modifiers.self_effects.push(effect.clone());
-            push_log(log, "  → 挑発付与".to_string());
+            push_skill_effect_event(log, "  → 挑発付与");
         }
         _ => {}
     }
@@ -760,7 +744,7 @@ fn apply_attack_effect(
 /// 死亡時スキル（復活など）のチェック
 pub fn check_death_skills(
     character: &mut CombatCharacter,
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
 ) -> bool {
     if let Some(ref unique_id) = character.skills.unique_id {
         let level = skill_slot_level(&character.skills, 0);
@@ -769,15 +753,12 @@ pub fn check_death_skills(
                 if effect.effect_type == SkillEffectType::Revive {
                     character.current_monster_count = character.base_monster_count as f32 * effect.value;
                     character.is_alive = true;
-                    push_log(
-                        log,
-                        format!(
+                    push_skill_effect_event(log, &format!(
                             "{}の「{}」が発動！{} 魔獣数で復活！",
                             character.name,
                             skill.name,
                             character.effective_monster_count()
-                        ),
-                    );
+                        ));
                     return true;
                 }
             }

@@ -1,10 +1,10 @@
 use crate::model::{
-    build_game_state, ensure_card_stat_bonuses, push_log, CardStatBonuses, GameState,
+    build_game_state, ensure_card_stat_bonuses, push_system_event, CardStatBonuses, GameState,
 };
 
 pub(super) fn apply_allocate_card_stats(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
     actor_player_id: &str,
     card_index: usize,
     delta: CardStatBonuses,
@@ -15,13 +15,13 @@ pub(super) fn apply_allocate_card_stats(
     };
 
     if card_index >= player.owned_cards.len() {
-        push_log(log, "指定の魔獣スロットが存在しません。".to_string());
+        push_system_event(log, "指定の魔獣スロットが存在しません。");
         return state.clone();
     }
 
     let spend = delta.total();
     if spend == 0 {
-        push_log(log, "振り分けるポイントを1以上指定してください。".to_string());
+        push_system_event(log, "振り分けるポイントを1以上指定してください。");
         return state.clone();
     }
 
@@ -32,13 +32,10 @@ pub(super) fn apply_allocate_card_stats(
 
     let available = player.card_status_points[card_index];
     if spend > available {
-        push_log(
-            log,
-            format!(
+        push_system_event(log, &format!(
                 "ステータスポイントが足りません（残り {} / 必要 {}）。",
                 available, spend
-            ),
-        );
+            ));
         return state.clone();
     }
 
@@ -48,13 +45,10 @@ pub(super) fn apply_allocate_card_stats(
     let name = crate::cards::get_card(player.owned_cards[card_index])
         .map(|c| c.name.to_string())
         .unwrap_or_else(|| format!("魔獣#{}", player.owned_cards[card_index]));
-    push_log(
-        log,
-        format!(
+    push_system_event(log, &format!(
             "「{}」にステータスを振り分けました（残りポイント {}）。",
             name, player.card_status_points[card_index]
-        ),
-    );
+        ));
 
     build_game_state(state, state.territories.clone(), log.clone(), players)
 }

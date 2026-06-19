@@ -1,10 +1,11 @@
 use super::*;
+use crate::model::push_system_event;
 
 use crate::facilities::calculate_facility_bonuses;
 
 pub(super) fn apply_set_formed_units(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     units: &[StoredFormedUnit],
 ) -> GameState {
@@ -16,17 +17,14 @@ pub(super) fn apply_set_formed_units(
     let bonuses = calculate_facility_bonuses(&player.facilities);
     let max_units = (1 + bonuses.unit_capacity).max(1) as usize;
     if units.len() > max_units {
-        push_log(
-            log,
-            format!("ユニット数が上限（{}）を超えています。", max_units),
-        );
+        push_system_event(log, &format!("ユニット数が上限（{}）を超えています。", max_units));
         return state.clone();
     }
 
     let slot_count = player.owned_cards.len();
     for unit in units {
         if unit.id.is_empty() || unit.name.is_empty() {
-            push_log(log, "ユニット情報が不正です。".to_string());
+            push_system_event(log, "ユニット情報が不正です。");
             return state.clone();
         }
         for &idx in &unit.indices {
@@ -34,7 +32,7 @@ pub(super) fn apply_set_formed_units(
                 continue;
             }
             if idx < 0 || idx as usize >= slot_count {
-                push_log(log, "編成スロットが不正です。".to_string());
+                push_system_event(log, "編成スロットが不正です。");
                 return state.clone();
             }
         }

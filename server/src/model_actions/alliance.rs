@@ -1,13 +1,14 @@
 use super::*;
+use crate::model::{push_system_event, push_alliance_event};
 
 pub(super) fn apply_create_alliance(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     name: &str,
 ) -> GameState {
     if state.alliances.iter().any(|a| a.member_ids.contains(&actor_player_id.to_string())) {
-        push_log(log, "既に同盟に所属しています。".to_string());
+        push_system_event(log, "既に同盟に所属しています。");
         return state.clone();
     }
     let alliance_id = format!("alliance_{}", state.alliances.len() + 1);
@@ -24,27 +25,27 @@ pub(super) fn apply_create_alliance(
     };
     let mut new_state = state.clone();
     new_state.alliances.push(alliance);
-    push_log(log, format!("同盟「{}」を結成しました！", name));
+    push_alliance_event(log, &format!("同盟「{}」を結成しました！", name));
     new_state.log = log.clone();
     new_state
 }
 
 pub(super) fn apply_join_alliance(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     alliance_id: &str,
 ) -> GameState {
     if state.alliances.iter().any(|a| a.member_ids.contains(&actor_player_id.to_string())) {
-        push_log(log, "既に同盟に所属しています。".to_string());
+        push_system_event(log, "既に同盟に所属しています。");
         return state.clone();
     }
     let mut new_state = state.clone();
     if let Some(alliance) = new_state.alliances.iter_mut().find(|a| a.id == alliance_id) {
         alliance.member_ids.push(actor_player_id.to_string());
-        push_log(log, format!("同盟「{}」に参加しました！", alliance.name));
+        push_alliance_event(log, &format!("同盟「{}」に参加しました！", alliance.name));
     } else {
-        push_log(log, "同盟が見つかりません。".to_string());
+        push_system_event(log, "同盟が見つかりません。");
     }
     new_state.log = log.clone();
     new_state
@@ -52,21 +53,21 @@ pub(super) fn apply_join_alliance(
 
 pub(super) fn apply_leave_alliance(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
 ) -> GameState {
     let mut new_state = state.clone();
     let player_id = actor_player_id.to_string();
     if let Some(alliance) = new_state.alliances.iter_mut().find(|a| a.member_ids.contains(&player_id)) {
         alliance.member_ids.retain(|id| id != &player_id);
-        push_log(log, format!("同盟「{}」を脱退しました。", alliance.name));
+        push_alliance_event(log, &format!("同盟「{}」を脱退しました。", alliance.name));
         if alliance.member_ids.is_empty() {
             let alliance_name = alliance.name.clone();
             new_state.alliances.retain(|a| !a.member_ids.is_empty());
-            push_log(log, format!("同盟「{}」は解散しました。", alliance_name));
+            push_alliance_event(log, &format!("同盟「{}」は解散しました。", alliance_name));
         } else if alliance.leader_id == player_id {
             alliance.leader_id = alliance.member_ids[0].clone();
-            push_log(log, format!("リーダーが{}に引き継がれました。", alliance.leader_id));
+            push_alliance_event(log, &format!("リーダーが{}に引き継がれました。", alliance.leader_id));
         }
     }
     new_state.log = log.clone();
@@ -79,7 +80,7 @@ pub(super) fn subjugate_alliance_of(
     victim_player_id: &str,
     victor_player_id: &str,
     alliances: &mut [crate::model::Alliance],
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
 ) {
     let victim_ix = alliances
         .iter()
@@ -116,10 +117,7 @@ pub(super) fn subjugate_alliance_of(
     }
     let victor_name = alliances[ai].name.clone();
     let victim_name = alliances[vi].name.clone();
-    push_log(
-        log,
-        format!("同盟「{}」は同盟「{}」の配下同盟となった！", victim_name, victor_name),
-    );
+    push_alliance_event(log, &format!("同盟「{}」は同盟「{}」の配下同盟となった！", victim_name, victor_name));
 }
 
 /// KC仕様準拠: 同盟レベルごとの累積寄付閾値
@@ -154,7 +152,7 @@ pub(crate) fn alliance_level_from_donation(donated: u64) -> u32 {
 
 pub(super) fn apply_donate_alliance(
     state: &GameState,
-    log: &mut Vec<String>,
+    log: &mut Vec<GameEvent>,
     actor_player_id: &str,
     food: u64,
     wood: u64,
@@ -174,7 +172,7 @@ pub(super) fn apply_donate_alliance(
         || player.resources.stone < stone
         || player.resources.iron < iron
     {
-        push_log(log, "寄付する資源が足りません。".to_string());
+        push_system_event(log, "寄付する資源が足りません。");
         return state.clone();
     }
     let mut alliances = state.alliances.clone();
@@ -182,7 +180,7 @@ pub(super) fn apply_donate_alliance(
         .iter()
         .position(|a| a.member_ids.iter().any(|m| m == actor_player_id))
     else {
-        push_log(log, "同盟に所属していないため寄付できません。".to_string());
+        push_system_event(log, "同盟に所属していないため寄付できません。");
         return state.clone();
     };
     player.resources.food -= food;
@@ -193,10 +191,7 @@ pub(super) fn apply_donate_alliance(
     let donated = alliances[ai].donated_total;
     let new_level = alliance_level_from_donation(donated);
     if new_level > alliances[ai].level {
-        push_log(
-            log,
-            format!("同盟への寄付が実を結び、同盟レベルが {} になった！", new_level),
-        );
+        push_alliance_event(log, &format!("同盟への寄付が実を結び、同盟レベルが {} になった！", new_level));
     }
     alliances[ai].level = new_level;
     let mut out = build_game_state(state, state.territories.clone(), log.clone(), players);

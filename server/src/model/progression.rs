@@ -1,4 +1,4 @@
-use super::*;
+use super::push_level_up_event;
 
 /// KC準拠: カードレベル→次のレベルに必要な累積経験値
 /// Lv1→Lv2: 100, Lv2→Lv3: 230, ... 緩やかな指数増加（Lv99で最大）
@@ -17,7 +17,7 @@ pub fn process_level_up(
     status_points: &mut u32,
     awakened: bool,
     log_name: &str,
-    log: &mut Vec<String>,
+    log: &mut Vec<crate::model::GameEvent>,
 ) -> bool {
     let mut leveled = false;
     let cap = if awakened { 120 } else { 99 };
@@ -36,13 +36,7 @@ pub fn process_level_up(
         *current_level += 1;
         *status_points = status_points.saturating_add(10);
         leveled = true;
-        push_log(
-            log,
-            format!(
-                "「{}」がLv{}にアップ！ステータスポイント+10",
-                log_name, *current_level
-            ),
-        );
+        push_level_up_event(log, log_name, *current_level);
     }
     leveled
 }

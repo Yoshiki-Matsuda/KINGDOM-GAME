@@ -2,8 +2,7 @@ use crate::{
     ai_actions::run_ai_faction_turn,
     app_state::{AppState, GameStore},
     config,
-    game_log::push_log,
-    model::AiPersonality,
+    model::{push_system_event, AiPersonality},
 };
 
 fn personality_label(personality: AiPersonality) -> &'static str {
@@ -83,9 +82,9 @@ pub(crate) fn spawn_ai_kingdom_scheduler(state: AppState) {
                     if !home_alive {
                         current.ai_factions.retain(|f| format!("ai_{}", f.faction_id) != ai_id);
                         current.players.remove(&ai_id);
-                        push_log(
+                        push_system_event(
                             &mut current.log,
-                            format!("【AI勢力】{ai_id} が滅亡しました。"),
+                            &format!("【AI勢力】{ai_id} が滅亡しました。"),
                         );
                         println!(
                             "[kingdom-server] AI tick {ai_id} ({faction_name}) 滅亡 home={}",

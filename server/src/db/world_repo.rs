@@ -4,7 +4,7 @@ use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 
 use crate::model::{
-    AiFaction, AiPersonality, Alliance, GameState, MarketItemType, MarketListing,
+    AiFaction, AiPersonality, Alliance, GameEvent, GameState, MarketItemType, MarketListing,
     SeasonInfo, Territory, WorldConfig,
 };
 use crate::ruins::RuinInfo;
@@ -204,14 +204,24 @@ pub(crate) async fn load_world(pool: &SqlitePool, world_id: &str) -> Option<Game
 
     // ログ
     let log_rows = sqlx::query(
-        "SELECT message FROM game_logs WHERE world_id = ? ORDER BY idx"
+        "SELECT id, timestamp, actor_id, event_type, data, message FROM event_logs WHERE world_id = ? ORDER BY id"
     )
     .bind(world_id)
     .fetch_all(pool)
     .await
     .unwrap_or_default();
 
-    let log: Vec<String> = log_rows.iter().map(|r| r.get::<String, _>("message")).collect();
+    let log: Vec<GameEvent> = log_rows.iter().map(|r| {
+        let data_str = r.get::<String, _>("data");
+        GameEvent {
+            id: r.get::<i64, _>("id") as u64,
+            timestamp: r.get::<i64, _>("timestamp") as u64,
+            actor_id: r.get::<Option<String>, _>("actor_id"),
+            event_type: r.get::<String, _>("event_type"),
+            data: serde_json::from_str(&data_str).unwrap_or(serde_json::json!({})),
+            message: r.get::<String, _>("message"),
+        }
+    }).collect();
 
     Some(GameState {
         world,
@@ -368,16 +378,23 @@ pub(crate) async fn save_world(
     }
 
     // ログ
-    sqlx::query("DELETE FROM game_logs WHERE world_id = ?")
+    sqlx::query("DELETE FROM event_logs WHERE world_id = ?")
         .bind(world_id)
         .execute(&mut *tx)
         .await?;
 
-    for (i, msg) in state.log.iter().enumerate() {
+    for ev in &state.log {
+        let data_str = serde_json::to_string(&ev.data).unwrap_or_else(|_| "{}".to_string());
         sqlx::query(
-            "INSERT INTO game_logs (world_id, idx, message) VALUES (?,?,?)"
+            "INSERT INTO event_logs (world_id, id, timestamp, actor_id, event_type, data, message) VALUES (?,?,?,?,?,?,?)"
         )
-        .bind(world_id).bind(i as u32).bind(msg)
+        .bind(world_id)
+        .bind(ev.id as i64)
+        .bind(ev.timestamp as i64)
+        .bind(&ev.actor_id)
+        .bind(&ev.event_type)
+        .bind(&data_str)
+        .bind(&ev.message)
         .execute(&mut *tx)
         .await?;
     }

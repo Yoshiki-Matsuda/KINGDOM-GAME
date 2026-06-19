@@ -9,12 +9,12 @@ export const TERRAIN_LEVEL_MOUNTAIN = 6;
 export const TERRAIN_LEVEL_PERIL = 7;
 export const TERRAIN_LEVEL_DEMON = 8;
 export const TERRAIN_LEVEL_DEEP = 9;
-const MOUNTAIN_SEED_CHANCE = [15, 1000] as const;
+const MOUNTAIN_SEED_CHANCE = [20, 1000] as const;
 const MOUNTAIN_SPREAD_CHANCE = [45, 100] as const;
 const RIVER_SEGMENT_CHANCE = [25, 1000] as const;
 const DEEP_TERRAIN_CHANCE_9 = [12, 10000] as const;
 const DEEP_TERRAIN_CHANCE_8 = [35, 10000] as const;
-const DEEP_TERRAIN_CHANCE_7 = [100, 10000] as const;
+const DEEP_TERRAIN_CHANCE_7 = [70, 10000] as const;
 
 export type TerrainRng = () => number;
 
@@ -90,7 +90,7 @@ function spreadMountains(grid: number[][], cols: number, rows: number, rng: Terr
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const level = grid[row][col];
-      if (level === 3 && genRatio(rng, MOUNTAIN_SEED_CHANCE[0], MOUNTAIN_SEED_CHANCE[1])) {
+      if ((level === 3 || level === 4) && genRatio(rng, MOUNTAIN_SEED_CHANCE[0], MOUNTAIN_SEED_CHANCE[1])) {
         grid[row][col] = TERRAIN_LEVEL_MOUNTAIN;
       }
     }
@@ -119,6 +119,27 @@ function spreadMountains(grid: number[][], cols: number, rows: number, rng: Terr
       genRatio(rng, MOUNTAIN_SPREAD_CHANCE[0], MOUNTAIN_SPREAD_CHANCE[1])
     ) {
       grid[row][col] = TERRAIN_LEVEL_ALPINE;
+    }
+  }
+  // Mountain clustering: existing mountains can grow into adjacent tiles
+  const mountains: [number, number][] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      if (grid[row][col] === TERRAIN_LEVEL_MOUNTAIN) mountains.push([row, col]);
+    }
+  }
+  for (const [row, col] of mountains) {
+    if (genRatio(rng, 40, 100)) {
+      const candidates = neighbors4(row, col, rows, cols).filter(
+        ([nr, nc]) =>
+          grid[nr][nc] !== TERRAIN_LEVEL_MOUNTAIN &&
+          grid[nr][nc] !== TERRAIN_LEVEL_ALPINE &&
+          grid[nr][nc] !== TERRAIN_LEVEL_RIVER
+      );
+      if (candidates.length > 0) {
+        const [nr, nc] = candidates[Math.floor(rng() * candidates.length)];
+        grid[nr][nc] = TERRAIN_LEVEL_MOUNTAIN;
+      }
     }
   }
 }
