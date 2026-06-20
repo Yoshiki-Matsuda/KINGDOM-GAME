@@ -23,7 +23,7 @@ use formation::*;
 use march::*;
 use market::*;
 
-use crate::model::push_system_event;
+use crate::model::push_actor_system_event;
 
 use crate::model::{
     attack_base_owner_ids,
@@ -78,7 +78,7 @@ pub(crate) fn apply_action(
     if server_mode == ServerMode::Pve {
         if let Some(msg) = validate_pve_action(state, actor_player_id, action) {
             let mut log = state.log.clone();
-            push_system_event(&mut log, &msg);
+            push_actor_system_event(&mut log, actor_player_id, &msg);
             return build_game_state(
                 state,
                 state.territories.clone(),

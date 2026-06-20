@@ -76,7 +76,7 @@ pub(super) fn apply_build_base(
             || player.resources.stone < cost_stone
             || player.resources.iron < cost_iron
         {
-            push_system_event(log, "資源が足りません。");
+            push_actor_system_event(log, actor_player_id, "資源が足りません。");
             return state.clone();
         }
         player.resources.food -= cost_food;
@@ -90,7 +90,7 @@ pub(super) fn apply_build_base(
     territories[idx].durability = territories[idx].max_durability;
     territories[idx].tower_level = 1;
     let name = territory_name(&territories, territory_id).to_string();
-    push_system_event(log, &format!("{}に前線基地を建設しました！", name));
+    push_actor_system_event(log, actor_player_id, &format!("{}に前線基地を建設しました！", name));
 
     build_game_state(state, territories, log.clone(), players)
 }
@@ -106,11 +106,11 @@ pub(super) fn apply_build_facility(
 ) -> GameState {
     let now = default_now_ms();
     let Some(build_seconds) = facility_build_time_seconds(facility_id, level) else {
-        push_system_event(log, "施設IDまたはレベル指定が不正です。");
+        push_actor_system_event(log, actor_player_id, "施設IDまたはレベル指定が不正です。");
         return state.clone();
     };
     let Some(costs) = facility_build_costs(level) else {
-        push_system_event(log, "レベル指定が不正です。");
+        push_actor_system_event(log, actor_player_id, "レベル指定が不正です。");
         return state.clone();
     };
 
@@ -119,7 +119,7 @@ pub(super) fn apply_build_facility(
         return state.clone();
     };
     if !consume_inventory_costs(&mut player.inventory, &costs) {
-        push_system_event(log, "施設建設に必要な素材が足りません。");
+        push_actor_system_event(log, actor_player_id, "施設建設に必要な素材が足りません。");
         return state.clone();
     }
 
@@ -131,7 +131,7 @@ pub(super) fn apply_build_facility(
         .iter()
         .any(|f| f.build_complete_at.map(|t| t > now).unwrap_or(false));
     if has_building {
-        push_system_event(log, "既に建設中の施設があります（同時1件まで）。");
+        push_actor_system_event(log, actor_player_id, "既に建設中の施設があります（同時1件まで）。");
         return state.clone();
     }
 
@@ -140,13 +140,13 @@ pub(super) fn apply_build_facility(
     match facilities.iter_mut().find(|f| f.facility_id == facility_id) {
         Some(existing) => {
             if level <= existing.level {
-                push_system_event(log, "現在より高いレベルを指定してください。");
+                push_actor_system_event(log, actor_player_id, "現在より高いレベルを指定してください。");
                 return state.clone();
             }
             if let Some(requested_position) = position {
                 if let Some(existing_position) = existing.position {
                     if existing_position != *requested_position {
-                        push_system_event(log, "施設の配置座標が一致しません。");
+                        push_actor_system_event(log, actor_player_id, "施設の配置座標が一致しません。");
                         return state.clone();
                     }
                 } else {
@@ -155,11 +155,11 @@ pub(super) fn apply_build_facility(
             }
             existing.level = level;
             existing.build_complete_at = Some(build_complete_at);
-            push_system_event(log, &format!("施設「{}」をLv{}へアップグレード開始。", facility_id, level));
+            push_actor_system_event(log, actor_player_id, &format!("施設「{}」をLv{}へアップグレード開始。", facility_id, level));
         }
         None => {
             let Some(position) = *position else {
-                push_system_event(log, "施設の配置座標を指定してください。");
+                push_actor_system_event(log, actor_player_id, "施設の配置座標を指定してください。");
                 return state.clone();
             };
             facilities.push(crate::model::BuiltFacility {
@@ -168,7 +168,7 @@ pub(super) fn apply_build_facility(
                 build_complete_at: Some(build_complete_at),
                 position: Some(position),
             });
-            push_system_event(log, &format!("施設「{}」の建設を開始。", facility_id));
+            push_actor_system_event(log, actor_player_id, &format!("施設「{}」の建設を開始。", facility_id));
         }
     }
 

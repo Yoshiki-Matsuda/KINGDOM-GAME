@@ -217,12 +217,8 @@ function renderActionTitle(action: ActionGroup): string {
 
 /** サーバー内部用のフェーズ区切り（ユーザー向けログには出さない） */
 function isHiddenBattleDelimiter(line: string): boolean {
-  if (
-    line.startsWith("--- 戦利品 ---") ||
-    line.startsWith("--- 魔獣入手 ---") ||
-    line.startsWith("--- 敵編成 ---")
-  ) {
-    return false;
+  if (line.startsWith("--- 敵編成 ---")) {
+    return true;
   }
   return /^--- .+ ---$/.test(line);
 }
@@ -565,9 +561,10 @@ function parseLogsToHistory(events: GameEvent[]): HistoryEntry[] {
     }
 
     // Post-battle loot mode end check
-    if (postBattleLootMode && currentBattle && etype !== "conquest_reward" &&
+    if (postBattleLootMode && currentBattle && etype !== "conquest" &&
+        etype !== "conquest_reward" &&
         etype !== "loot_gold" && etype !== "loot_item" && etype !== "card_drop" &&
-        etype !== "ruin_clear" && etype !== "battle_start") {
+        etype !== "ruin_clear" && etype !== "battle_start" && etype !== "phase") {
       finalizeCurrent();
       postBattleLootMode = false;
     }
@@ -601,11 +598,15 @@ function parseLogsToHistory(events: GameEvent[]): HistoryEntry[] {
     if (etype === "enemy_roster") {
       if (!currentBattle) continue;
       if (currentAction) currentBattle.actions.push(currentAction);
+      const enemies = ev.data?.enemies as Array<{ name?: string; count?: number }> | undefined;
+      const rosterLines: string[] = enemies
+        ? enemies.map((e) => `${e.name ?? "不明"}（魔獣数: ${e.count ?? 1}）`)
+        : [];
       currentAction = {
         type: "phase",
         title: "敵編成",
         icon: "👹",
-        lines: [line],
+        lines: rosterLines.length > 0 ? rosterLines : [line],
         side: "enemy",
       };
       continue;

@@ -1565,6 +1565,7 @@ pub(super) fn apply_attack_action(
             territories[to_idx].body_monster_counts = Some(occupying);
             territories[to_idx].body_names = None;
         }
+        push_battle_end_event(log, actor_player_id, "victory", &to_name);
         push_conquest_event(log, actor_player_id, &to_name);
 
         let level = territories[to_idx].level;

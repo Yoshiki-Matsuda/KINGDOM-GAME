@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::{push_system_event, push_alliance_event};
+use crate::model::{push_actor_system_event, push_alliance_event};
 
 pub(super) fn apply_create_alliance(
     state: &GameState,
@@ -8,7 +8,7 @@ pub(super) fn apply_create_alliance(
     name: &str,
 ) -> GameState {
     if state.alliances.iter().any(|a| a.member_ids.contains(&actor_player_id.to_string())) {
-        push_system_event(log, "既に同盟に所属しています。");
+        push_actor_system_event(log, actor_player_id, "既に同盟に所属しています。");
         return state.clone();
     }
     let alliance_id = format!("alliance_{}", state.alliances.len() + 1);
@@ -37,7 +37,7 @@ pub(super) fn apply_join_alliance(
     alliance_id: &str,
 ) -> GameState {
     if state.alliances.iter().any(|a| a.member_ids.contains(&actor_player_id.to_string())) {
-        push_system_event(log, "既に同盟に所属しています。");
+        push_actor_system_event(log, actor_player_id, "既に同盟に所属しています。");
         return state.clone();
     }
     let mut new_state = state.clone();
@@ -45,7 +45,7 @@ pub(super) fn apply_join_alliance(
         alliance.member_ids.push(actor_player_id.to_string());
         push_alliance_event(log, &format!("同盟「{}」に参加しました！", alliance.name));
     } else {
-        push_system_event(log, "同盟が見つかりません。");
+        push_actor_system_event(log, actor_player_id, "同盟が見つかりません。");
     }
     new_state.log = log.clone();
     new_state
@@ -172,7 +172,7 @@ pub(super) fn apply_donate_alliance(
         || player.resources.stone < stone
         || player.resources.iron < iron
     {
-        push_system_event(log, "寄付する資源が足りません。");
+        push_actor_system_event(log, actor_player_id, "寄付する資源が足りません。");
         return state.clone();
     }
     let mut alliances = state.alliances.clone();
@@ -180,7 +180,7 @@ pub(super) fn apply_donate_alliance(
         .iter()
         .position(|a| a.member_ids.iter().any(|m| m == actor_player_id))
     else {
-        push_system_event(log, "同盟に所属していないため寄付できません。");
+        push_actor_system_event(log, actor_player_id, "同盟に所属していないため寄付できません。");
         return state.clone();
     };
     player.resources.food -= food;
