@@ -37,32 +37,29 @@ fn push(log: &mut Vec<GameEvent>, ev: GameEvent) {
     }
 }
 
+fn push_new(log: &mut Vec<GameEvent>, actor_id: Option<&str>, event_type: &str, data: serde_json::Value, message: String) {
+    push(log, GameEvent {
+        id: next_id(),
+        timestamp: now_ms(),
+        actor_id: actor_id.map(|s| s.to_string()),
+        event_type: event_type.to_string(),
+        data,
+        message,
+    });
+}
+
 // ---------------------------------------------------------------------------
 // 汎用
 // ---------------------------------------------------------------------------
 
 /// 旧 push_log 相当。段階的移行用の汎用システムイベント。
 pub fn push_system_event(log: &mut Vec<GameEvent>, message: &str) {
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: "system".to_string(),
-        data: serde_json::json!({}),
-        message: message.to_string(),
-    });
+    push_new(log, None, "system", serde_json::json!({}), message.to_string());
 }
 
 /// 旧 push_actor_log 相当。段階的移行用の汎用アクターイベント。
 pub fn push_actor_system_event(log: &mut Vec<GameEvent>, actor_id: &str, message: &str) {
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "system".to_string(),
-        data: serde_json::json!({}),
-        message: message.to_string(),
-    });
+    push_new(log, Some(actor_id), "system", serde_json::json!({}), message.to_string());
 }
 
 // ---------------------------------------------------------------------------
@@ -80,19 +77,12 @@ pub fn push_battle_start_event(
     let msg = format!(
         "【{territory_name}{coords}侵攻戦】{attacker_label}が{territory_name}（{defender_label}）へ侵攻開始"
     );
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "battle_start".to_string(),
-        data: serde_json::json!({
-            "territory_name": territory_name,
-            "defender_label": defender_label,
-            "attacker_label": attacker_label,
-            "coords": coords,
-        }),
-        message: msg,
-    });
+    push_new(log, Some(actor_id), "battle_start", serde_json::json!({
+        "territory_name": territory_name,
+        "defender_label": defender_label,
+        "attacker_label": attacker_label,
+        "coords": coords,
+    }), msg);
 }
 
 pub fn push_battle_end_event(
@@ -110,17 +100,10 @@ pub fn push_battle_end_event(
         "timeout" => "8ターン経過。防衛側の勝利。".to_string(),
         _ => result.to_string(),
     };
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "battle_end".to_string(),
-        data: serde_json::json!({
-            "result": result,
-            "territory_name": territory_name,
-        }),
-        message: msg,
-    });
+    push_new(log, Some(actor_id), "battle_end", serde_json::json!({
+        "result": result,
+        "territory_name": territory_name,
+    }), msg);
 }
 
 pub fn push_attack_event(
@@ -131,19 +114,12 @@ pub fn push_attack_event(
     side: &str,
 ) {
     let msg = format!("[{side}] {attacker}が{target}に攻撃！（{damage:.0} ダメージ）");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: "attack".to_string(),
-        data: serde_json::json!({
-            "attacker": attacker,
-            "target": target,
-            "damage": damage,
-            "side": side,
-        }),
-        message: msg,
-    });
+    push_new(log, None, "attack", serde_json::json!({
+        "attacker": attacker,
+        "target": target,
+        "damage": damage,
+        "side": side,
+    }), msg);
 }
 
 pub fn push_defeat_event(
@@ -157,17 +133,10 @@ pub fn push_defeat_event(
     } else {
         format!("{attacker}が{target}を撃破しました。")
     };
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: "defeat".to_string(),
-        data: serde_json::json!({
-            "attacker": attacker,
-            "target": target,
-        }),
-        message: msg,
-    });
+    push_new(log, None, "defeat", serde_json::json!({
+        "attacker": attacker,
+        "target": target,
+    }), msg);
 }
 
 pub fn push_absorb_event(
@@ -178,47 +147,26 @@ pub fn push_absorb_event(
     after: f32,
 ) {
     let msg = format!("{attacker}が {absorb:.0} 魔獣数を吸収！（{before:.0} → {after:.0}）");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: "absorb".to_string(),
-        data: serde_json::json!({
-            "attacker": attacker,
-            "absorb": absorb,
-            "before": before,
-            "after": after,
-        }),
-        message: msg,
-    });
+    push_new(log, None, "absorb", serde_json::json!({
+        "attacker": attacker,
+        "absorb": absorb,
+        "before": before,
+        "after": after,
+    }), msg);
 }
 
 pub fn push_enemy_roster_event(
     log: &mut Vec<GameEvent>,
     enemies: Vec<serde_json::Value>,
 ) {
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: "enemy_roster".to_string(),
-        data: serde_json::json!({ "enemies": enemies }),
-        message: "--- 敵編成 ---".to_string(),
-    });
+    push_new(log, None, "enemy_roster", serde_json::json!({ "enemies": enemies }), "--- 敵編成 ---".to_string());
 }
 
 pub fn push_phase_event(
     log: &mut Vec<GameEvent>,
     phase: &str,
 ) {
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: "phase".to_string(),
-        data: serde_json::json!({ "phase": phase }),
-        message: format!("--- {phase} ---"),
-    });
+    push_new(log, None, "phase", serde_json::json!({ "phase": phase }), format!("--- {phase} ---"));
 }
 
 // ---------------------------------------------------------------------------
@@ -235,241 +183,80 @@ pub fn push_skill_event(
 ) {
     let label = if is_unique { "固有スキル" } else { "" };
     let msg = format!("{prefix} {side} {char_name}の{label}「{skill_name}」が発動！");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: if is_unique { "skill_unique".to_string() } else { "skill_active".to_string() },
-        data: serde_json::json!({
-            "character": char_name,
-            "skill": skill_name,
-            "side": side,
-        }),
-        message: msg,
-    });
+    let et = if is_unique { "skill_unique" } else { "skill_active" };
+    push_new(log, None, et, serde_json::json!({
+        "character": char_name,
+        "skill": skill_name,
+        "side": side,
+    }), msg);
 }
 
-pub fn push_skill_effect_event(
-    log: &mut Vec<GameEvent>,
-    message: &str,
-) {
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: "skill_effect".to_string(),
-        data: serde_json::json!({}),
-        message: message.to_string(),
-    });
+pub fn push_skill_effect_event(log: &mut Vec<GameEvent>, message: &str) {
+    push_new(log, None, "skill_effect", serde_json::json!({}), message.to_string());
 }
 
 // ---------------------------------------------------------------------------
 // 戦利品・報酬
 // ---------------------------------------------------------------------------
 
-pub fn push_loot_gold_event(
-    log: &mut Vec<GameEvent>,
-    actor_id: &str,
-    amount: u32,
-) {
-    let msg = format!("ゴールド+{amount} を入手！");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "loot_gold".to_string(),
-        data: serde_json::json!({ "amount": amount }),
-        message: msg,
-    });
+pub fn push_loot_gold_event(log: &mut Vec<GameEvent>, actor_id: &str, amount: u32) {
+    push_new(log, Some(actor_id), "loot_gold", serde_json::json!({ "amount": amount }), format!("ゴールド+{amount} を入手！"));
 }
 
-pub fn push_loot_item_event(
-    log: &mut Vec<GameEvent>,
-    actor_id: &str,
-    item_id: &str,
-    item_name: &str,
-    count: u32,
-) {
-    let msg = format!("{item_name}x{count} を入手！");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "loot_item".to_string(),
-        data: serde_json::json!({
-            "item_id": item_id,
-            "item_name": item_name,
-            "count": count,
-        }),
-        message: msg,
-    });
+pub fn push_loot_item_event(log: &mut Vec<GameEvent>, actor_id: &str, item_id: &str, item_name: &str, count: u32) {
+    push_new(log, Some(actor_id), "loot_item", serde_json::json!({
+        "item_id": item_id, "item_name": item_name, "count": count,
+    }), format!("{item_name}x{count} を入手！"));
 }
 
-pub fn push_card_drop_event(
-    log: &mut Vec<GameEvent>,
-    actor_id: &str,
-    card_name: &str,
-) {
-    let msg = format!("魔獣「{card_name}」を入手！");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "card_drop".to_string(),
-        data: serde_json::json!({ "card_name": card_name }),
-        message: msg,
-    });
+pub fn push_card_drop_event(log: &mut Vec<GameEvent>, actor_id: &str, card_name: &str) {
+    push_new(log, Some(actor_id), "card_drop", serde_json::json!({ "card_name": card_name }), format!("魔獣「{card_name}」を入手！"));
 }
 
-pub fn push_conquest_event(
-    log: &mut Vec<GameEvent>,
-    actor_id: &str,
-    territory_name: &str,
-) {
-    let msg = format!("{territory_name}を占領しました！");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "conquest".to_string(),
-        data: serde_json::json!({ "territory_name": territory_name }),
-        message: msg,
-    });
+pub fn push_conquest_event(log: &mut Vec<GameEvent>, actor_id: &str, territory_name: &str) {
+    push_new(log, Some(actor_id), "conquest", serde_json::json!({ "territory_name": territory_name }), format!("{territory_name}を占領しました！"));
 }
 
-pub fn push_conquest_reward_event(
-    log: &mut Vec<GameEvent>,
-    actor_id: &str,
-    food: u64,
-    wood: u64,
-    stone: u64,
-    iron: u64,
-) {
-    let msg = format!("占領報酬: 食料+{food}・木+{wood}・石+{stone}・鉄+{iron}");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "conquest_reward".to_string(),
-        data: serde_json::json!({
-            "food": food,
-            "wood": wood,
-            "stone": stone,
-            "iron": iron,
-        }),
-        message: msg,
-    });
+pub fn push_conquest_reward_event(log: &mut Vec<GameEvent>, actor_id: &str, food: u64, wood: u64, stone: u64, iron: u64) {
+    push_new(log, Some(actor_id), "conquest_reward", serde_json::json!({
+        "food": food, "wood": wood, "stone": stone, "iron": iron,
+    }), format!("占領報酬: 食料+{food}・木+{wood}・石+{stone}・鉄+{iron}"));
 }
 
-pub fn push_ruin_clear_event(
-    log: &mut Vec<GameEvent>,
-    actor_id: &str,
-) {
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "ruin_clear".to_string(),
-        data: serde_json::json!({}),
-        message: "遺跡を攻略しました！".to_string(),
-    });
+pub fn push_ruin_clear_event(log: &mut Vec<GameEvent>, actor_id: &str) {
+    push_new(log, Some(actor_id), "ruin_clear", serde_json::json!({}), "遺跡を攻略しました！".to_string());
 }
 
 // ---------------------------------------------------------------------------
 // レベルアップ
 // ---------------------------------------------------------------------------
 
-pub fn push_level_up_event(
-    log: &mut Vec<GameEvent>,
-    name: &str,
-    level: u32,
-) {
-    let msg = format!("{name}がLv{level}に上がった！");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: "level_up".to_string(),
-        data: serde_json::json!({ "name": name, "level": level }),
-        message: msg,
-    });
+pub fn push_level_up_event(log: &mut Vec<GameEvent>, name: &str, level: u32) {
+    push_new(log, None, "level_up", serde_json::json!({ "name": name, "level": level }), format!("{name}がLv{level}に上がった！"));
 }
 
 // ---------------------------------------------------------------------------
 // 探索
 // ---------------------------------------------------------------------------
 
-pub fn push_explore_dispatch_event(
-    log: &mut Vec<GameEvent>,
-    actor_id: &str,
-    territory_name: &str,
-    message: &str,
-) {
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "explore_dispatch".to_string(),
-        data: serde_json::json!({ "territory_name": territory_name }),
-        message: message.to_string(),
-    });
+pub fn push_explore_dispatch_event(log: &mut Vec<GameEvent>, actor_id: &str, territory_name: &str, message: &str) {
+    push_new(log, Some(actor_id), "explore_dispatch", serde_json::json!({ "territory_name": territory_name }), message.to_string());
 }
 
-pub fn push_explore_complete_event(
-    log: &mut Vec<GameEvent>,
-    actor_id: &str,
-    territory_name: &str,
-    food: u64,
-    wood: u64,
-    stone: u64,
-    iron: u64,
-) {
-    let msg = format!("{territory_name}の探索が完了。食料+{food}・木+{wood}・石+{stone}・鉄+{iron}");
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "explore_complete".to_string(),
-        data: serde_json::json!({
-            "territory_name": territory_name,
-            "food": food,
-            "wood": wood,
-            "stone": stone,
-            "iron": iron,
-        }),
-        message: msg,
-    });
+pub fn push_explore_complete_event(log: &mut Vec<GameEvent>, actor_id: &str, territory_name: &str, food: u64, wood: u64, stone: u64, iron: u64) {
+    push_new(log, Some(actor_id), "explore_complete", serde_json::json!({
+        "territory_name": territory_name, "food": food, "wood": wood, "stone": stone, "iron": iron,
+    }), format!("{territory_name}の探索が完了。食料+{food}・木+{wood}・石+{stone}・鉄+{iron}"));
 }
 
-pub fn push_explore_level_up_event(
-    log: &mut Vec<GameEvent>,
-    actor_id: &str,
-    message: &str,
-) {
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: Some(actor_id.to_string()),
-        event_type: "explore_level_up".to_string(),
-        data: serde_json::json!({}),
-        message: message.to_string(),
-    });
+pub fn push_explore_level_up_event(log: &mut Vec<GameEvent>, actor_id: &str, message: &str) {
+    push_new(log, Some(actor_id), "explore_level_up", serde_json::json!({}), message.to_string());
 }
 
 // ---------------------------------------------------------------------------
 // 同盟
 // ---------------------------------------------------------------------------
 
-pub fn push_alliance_event(
-    log: &mut Vec<GameEvent>,
-    message: &str,
-) {
-    push(log, GameEvent {
-        id: next_id(),
-        timestamp: now_ms(),
-        actor_id: None,
-        event_type: "alliance".to_string(),
-        data: serde_json::json!({}),
-        message: message.to_string(),
-    });
+pub fn push_alliance_event(log: &mut Vec<GameEvent>, message: &str) {
+    push_new(log, None, "alliance", serde_json::json!({}), message.to_string());
 }

@@ -5,6 +5,7 @@ use axum::{
     },
     response::Response,
 };
+use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
@@ -110,7 +111,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 }
 
                 let _guard = state.mutation_lock.lock().await;
-                let game_snapshot = { world_arc.read().await.clone() };
+                let game_snapshot = { Arc::new(world_arc.read().await.clone()) };
                 let dev_auto_win = state.dev_auto_win;
                 let actor_for_apply = actor_player_id.clone();
                 let action_for_log = action.clone();

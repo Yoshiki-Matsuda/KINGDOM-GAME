@@ -40,13 +40,34 @@ export function createFleaMarketElement(): HTMLDivElement {
 
   listingContainer = marketEl.querySelector(".market-content") as HTMLDivElement;
 
-  marketEl.querySelectorAll(".market-tab").forEach(btn => {
-    btn.addEventListener("click", () => {
-      currentTab = (btn as HTMLElement).dataset.tab as typeof currentTab;
+  // イベント委譲: listingContainer 全体で1回だけリスナー登録
+  listingContainer.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const buyBtn = target.closest(".listing-buy-btn") as HTMLElement | null;
+    if (buyBtn && !buyBtn.classList.contains("disabled")) {
+      const id = buyBtn.dataset.listingId!;
+      if (confirm("この出品を購入しますか？")) {
+        sendMarketAction({ action: "buy_from_flea_market", listing_id: id });
+      }
+      return;
+    }
+    const cancelBtn = target.closest(".listing-cancel-btn") as HTMLElement | null;
+    if (cancelBtn) {
+      const id = cancelBtn.dataset.listingId!;
+      sendMarketAction({ action: "cancel_flea_market_listing", listing_id: id });
+    }
+  });
+
+  marketEl.addEventListener("click", (e) => {
+    const tab = (e.target as HTMLElement).closest(".market-tab") as HTMLButtonElement | null;
+    if (!tab) return;
+    const newTab = tab.dataset.tab as typeof currentTab;
+    if (newTab !== currentTab) {
+      currentTab = newTab;
       marketEl.querySelectorAll(".market-tab").forEach(b => b.classList.remove("is-active"));
-      btn.classList.add("is-active");
+      tab.classList.add("is-active");
       renderFleaMarket();
-    });
+    }
   });
 
   return marketEl;
@@ -103,15 +124,6 @@ function renderBrowseTab(): void {
       </button>
     </div>
   `).join("");
-
-  listingContainer.querySelectorAll(".listing-buy-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const id = (btn as HTMLElement).dataset.listingId!;
-      if (confirm("この出品を購入しますか？")) {
-        sendMarketAction({ action: "buy_from_flea_market", listing_id: id });
-      }
-    });
-  });
 }
 
 function renderMyListingsTab(): void {
@@ -129,13 +141,6 @@ function renderMyListingsTab(): void {
       <button type="button" class="listing-cancel-btn" data-listing-id="${l.listing_id}">取消</button>
     </div>
   `).join("");
-
-  listingContainer.querySelectorAll(".listing-cancel-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const id = (btn as HTMLElement).dataset.listingId!;
-      sendMarketAction({ action: "cancel_flea_market_listing", listing_id: id });
-    });
-  });
 }
 
 function renderSellTab(): void {
@@ -143,7 +148,7 @@ function renderSellTab(): void {
   const inventory = getInventoryForState(gameState);
   const res = getPlayerResources(gameState, getLocalPlayerId());
 
-  listingContainer.innerHTML = `
+   listingContainer.innerHTML = `
     <div class="sell-form">
       <div class="sell-section">
         <h3>出品種別</h3>

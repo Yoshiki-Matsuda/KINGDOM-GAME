@@ -34,6 +34,19 @@ function getTravelingDestinations(now: number = Date.now()): TravelingDestinatio
 
 let mapWasVisible = false;
 
+/** マップの表示/非表示と wake/update を統一制御 */
+function applyMapVisibility(canShowMap: boolean): void {
+  setMapVisible(canShowMap);
+  if (canShowMap) {
+    if (!mapWasVisible) {
+      wakeMapView(gameState, getTravelingDestinations());
+    } else {
+      updateMapView(gameState, getTravelingDestinations());
+    }
+  }
+  mapWasVisible = canShowMap;
+}
+
 export function createAppRenderer(elements: RenderElements): {
   render: () => void;
   renderMapSession: () => void;
@@ -48,15 +61,7 @@ export function createAppRenderer(elements: RenderElements): {
 
     updateHudSettings();
     updateBottomMenu();
-    setMapVisible(canShowMap);
-    if (canShowMap) {
-      if (!mapWasVisible) {
-        wakeMapView(gameState, getTravelingDestinations());
-      } else {
-        updateMapView(gameState, getTravelingDestinations());
-      }
-    }
-    mapWasVisible = canShowMap;
+    applyMapVisibility(canShowMap);
     updateUnitSelectReturningList();
   };
 
@@ -97,15 +102,7 @@ export function createAppRenderer(elements: RenderElements): {
     renderLog();
     updateHudSettings();
     updateBottomMenu();
-    setMapVisible(canShowMap);
-    if (canShowMap) {
-      if (!mapWasVisible) {
-        wakeMapView(gameState, getTravelingDestinations());
-      } else {
-        updateMapView(gameState, getTravelingDestinations());
-      }
-    }
-    mapWasVisible = canShowMap;
+    applyMapVisibility(canShowMap);
     updateUnitSelectReturningList();
   };
 

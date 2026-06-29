@@ -3,7 +3,7 @@ import { createHudSettingsElement } from "./ui/hud-settings";
 import { createLogElement } from "./ui/log-panel";
 import { createMenuElement } from "./ui/context-menu";
 import { createUnitSelectElement } from "./ui/unit-select";
-import { createFormationElement } from "./ui/formation-screen";
+import { createFormationElementAndSetup } from "./ui/formation-screen";
 import { createHomeElement } from "./ui/home-screen";
 import { createBottomMenuElement } from "./ui/bottom-menu";
 import { createInventoryElement } from "./ui/inventory-screen";

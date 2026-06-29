@@ -47,7 +47,6 @@ export function createFacilityBuildState(
   } = context;
 
   if (!selectedTile) return null;
-  if (level === 1 && !selectedTile) return null;
   if (level === 1 && existingFacilities.some((facility) => facility.facility_id === facilityId)) return null;
 
   const facility = FACILITIES[facilityId];
@@ -74,7 +73,6 @@ export function createFacilityBuildState(
   const nextFacilities = [...existingFacilities];
   const existingIndex = nextFacilities.findIndex((builtFacility) => {
     if (builtFacility.facility_id !== facilityId) return false;
-    if (!selectedTile) return true;
     if (builtFacility.position) {
       return (
         builtFacility.position.col === selectedTile.col &&

@@ -45,10 +45,7 @@ let homeEl: HTMLDivElement;
 let gridContainer: HTMLDivElement;
 let buildMenuEl: HTMLDivElement;
 let facilityPanelEl: HTMLDivElement;
-let _buildMenuTarget: { col: number; row: number } | null = null;
-let _buildMenuDocListener: ((e: MouseEvent) => void) | null = null;
-void _buildMenuTarget;
-void _buildMenuDocListener;
+
 let homeMapInitialized = false;
 let selectedCategory: FacilityCategory = "resource";
 let buildingTimerId: number | null = null;
@@ -60,7 +57,7 @@ function isCastleTile(col: number, row: number): boolean {
 }
 
 // 開発用：建設時間を短縮（5秒）
-const DEV_MODE = true;
+const DEV_MODE = import.meta.env.DEV;
 const DEV_BUILD_TIME_SECONDS = 5;
 
 /** 現在の本拠地グリッドサイズを取得（施設ボーナス込み） */
@@ -162,23 +159,8 @@ function updateBuildingTimers(): void {
   });
 }
 
-function _formatBuildTime(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  if (mins > 0) {
-    return `${mins}分${secs}秒`;
-  }
-  return `${secs}秒`;
-}
-void _formatBuildTime;
-
 function hideBuildMenu(): void {
   buildMenuEl.hidden = true;
-  _buildMenuTarget = null;
-  if (_buildMenuDocListener) {
-    document.removeEventListener("click", _buildMenuDocListener);
-    _buildMenuDocListener = null;
-  }
 }
 
 function renderHomeContent(): void {

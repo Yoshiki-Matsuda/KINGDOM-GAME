@@ -62,219 +62,109 @@ export interface CharacterData {
   skills: CharacterSkills;
 }
 
-/** 各キャラクターの固有ステータス */
-const CHARACTER_STATS: Record<number, Partial<CardStats>> = {
+/** 統合キャラクター定義: 全属性を1レコードに集約 */
+interface CharacterDef {
+  name: string;
+  race: Race;
+  rarity: CardRarity;
+  stats: Partial<CardStats>;
+}
+
+const CHARACTERS: Record<number, CharacterDef> = {
   // === プレイヤー初期魔獣（KC 7種族） ===
-  0: { monster_count: 15, attack: 9, intelligence: 3, defense: 4, magicDefense: 3, speed: 6 },  // ダイアウルフ
-  1: { monster_count: 18, attack: 7, intelligence: 4, defense: 6, magicDefense: 3, speed: 5 },  // ゴブリンウォリアー
-  2: { monster_count: 10, attack: 4, intelligence: 10, defense: 2, magicDefense: 6, speed: 7, range: 2 }, // インプ
-  3: { monster_count: 12, attack: 8, intelligence: 6, defense: 5, magicDefense: 5, speed: 5, range: 2 },  // ワイバーン
-  4: { monster_count: 16, attack: 6, intelligence: 2, defense: 10, magicDefense: 4, speed: 3 }, // ゴーレム
-  5: { monster_count: 11, attack: 5, intelligence: 9, defense: 3, magicDefense: 7, speed: 5, range: 2 },  // サラマンダー
-  6: { monster_count: 14, attack: 7, intelligence: 3, defense: 7, magicDefense: 4, speed: 4 },  // スケルトンソルジャー
-  7: { monster_count: 13, attack: 8, intelligence: 4, defense: 3, magicDefense: 3, speed: 7 },  // ヘルハウンド
-  8: { monster_count: 14, attack: 8, intelligence: 5, defense: 5, magicDefense: 4, speed: 5 },  // リザードマン
-  9: { monster_count: 16, attack: 5, intelligence: 7, defense: 8, magicDefense: 6, speed: 3 },  // トレント
-
+  0: { name: "ダイアウルフ", race: "beast", rarity: "rare", stats: { monster_count: 15, attack: 9, intelligence: 3, defense: 4, magicDefense: 3, speed: 6 } },
+  1: { name: "ゴブリンウォリアー", race: "demihuman", rarity: "rare", stats: { monster_count: 18, attack: 7, intelligence: 4, defense: 6, magicDefense: 3, speed: 5 } },
+  2: { name: "インプ", race: "demon", rarity: "rare", stats: { monster_count: 10, attack: 4, intelligence: 10, defense: 2, magicDefense: 6, speed: 7, range: 2 } },
+  3: { name: "ワイバーン", race: "dragon", rarity: "rare", stats: { monster_count: 12, attack: 8, intelligence: 6, defense: 5, magicDefense: 5, speed: 5, range: 2 } },
+  4: { name: "ゴーレム", race: "giant", rarity: "rare", stats: { monster_count: 16, attack: 6, intelligence: 2, defense: 10, magicDefense: 4, speed: 3 } },
+  5: { name: "サラマンダー", race: "spirit", rarity: "rare", stats: { monster_count: 11, attack: 5, intelligence: 9, defense: 3, magicDefense: 7, speed: 5, range: 2 } },
+  6: { name: "スケルトンソルジャー", race: "undead", rarity: "rare", stats: { monster_count: 14, attack: 7, intelligence: 3, defense: 7, magicDefense: 4, speed: 4 } },
+  7: { name: "ヘルハウンド", race: "beast", rarity: "rare", stats: { monster_count: 13, attack: 8, intelligence: 4, defense: 3, magicDefense: 3, speed: 7 } },
+  8: { name: "リザードマン", race: "demihuman", rarity: "rare", stats: { monster_count: 14, attack: 8, intelligence: 5, defense: 5, magicDefense: 4, speed: 5 } },
+  9: { name: "トレント", race: "spirit", rarity: "rare", stats: { monster_count: 16, attack: 5, intelligence: 7, defense: 8, magicDefense: 6, speed: 3 } },
   // === フィールド敵（Lv1〜6） ===
-  10: { monster_count: 2, attack: 3, intelligence: 2, defense: 2, magicDefense: 1, speed: 3 },  // ゴブリン
-  11: { monster_count: 4, attack: 5, intelligence: 3, defense: 3, magicDefense: 2, speed: 4 },  // コボルド
-  12: { monster_count: 6, attack: 8, intelligence: 4, defense: 6, magicDefense: 3, speed: 3 },  // オーク
-  13: { monster_count: 8, attack: 10, intelligence: 6, defense: 8, magicDefense: 5, speed: 4 }, // スケルトン
-  14: { monster_count: 12, attack: 15, intelligence: 3, defense: 12, magicDefense: 4, speed: 3 }, // トロール
-  15: { monster_count: 15, attack: 20, intelligence: 15, defense: 15, magicDefense: 10, speed: 6, range: 2 }, // ドレイク
-
+  10: { name: "ゴブリン", race: "demihuman", rarity: "common", stats: { monster_count: 2, attack: 3, intelligence: 2, defense: 2, magicDefense: 1, speed: 3 } },
+  11: { name: "コボルド", race: "demihuman", rarity: "common", stats: { monster_count: 4, attack: 5, intelligence: 3, defense: 3, magicDefense: 2, speed: 4 } },
+  12: { name: "オーク", race: "demihuman", rarity: "uncommon", stats: { monster_count: 6, attack: 8, intelligence: 4, defense: 6, magicDefense: 3, speed: 3 } },
+  13: { name: "スケルトン", race: "undead", rarity: "uncommon", stats: { monster_count: 8, attack: 10, intelligence: 6, defense: 8, magicDefense: 5, speed: 4 } },
+  14: { name: "トロール", race: "giant", rarity: "rare", stats: { monster_count: 12, attack: 15, intelligence: 3, defense: 12, magicDefense: 4, speed: 3 } },
+  15: { name: "ドレイク", race: "dragon", rarity: "epic", stats: { monster_count: 15, attack: 20, intelligence: 15, defense: 15, magicDefense: 10, speed: 6, range: 2 } },
   // === 遺跡敵（ノーマル） ===
-  20: { monster_count: 8, attack: 6, intelligence: 2, defense: 10, magicDefense: 4, speed: 2 },  // ストーンゴーレム
-  21: { monster_count: 6, attack: 4, intelligence: 8, defense: 3, magicDefense: 8, speed: 5, range: 2 },   // ゴースト
-  22: { monster_count: 10, attack: 10, intelligence: 3, defense: 8, magicDefense: 4, speed: 4 }, // スケルトンナイト
-  23: { monster_count: 12, attack: 7, intelligence: 8, defense: 4, magicDefense: 6, speed: 5 }, // コカトリス
-  24: { monster_count: 7, attack: 8, intelligence: 5, defense: 5, magicDefense: 5, speed: 7 },   // ミミック
-  25: { monster_count: 5, attack: 6, intelligence: 4, defense: 3, magicDefense: 3, speed: 6 },   // ポイズンスパイダー
-
+  20: { name: "ストーンゴーレム", race: "giant", rarity: "uncommon", stats: { monster_count: 8, attack: 6, intelligence: 2, defense: 10, magicDefense: 4, speed: 2 } },
+  21: { name: "ゴースト", race: "undead", rarity: "uncommon", stats: { monster_count: 6, attack: 4, intelligence: 8, defense: 3, magicDefense: 8, speed: 5, range: 2 } },
+  22: { name: "スケルトンナイト", race: "undead", rarity: "uncommon", stats: { monster_count: 10, attack: 10, intelligence: 3, defense: 8, magicDefense: 4, speed: 4 } },
+  23: { name: "コカトリス", race: "beast", rarity: "rare", stats: { monster_count: 12, attack: 7, intelligence: 8, defense: 4, magicDefense: 6, speed: 5 } },
+  24: { name: "ミミック", race: "demon", rarity: "rare", stats: { monster_count: 7, attack: 8, intelligence: 5, defense: 5, magicDefense: 5, speed: 7 } },
+  25: { name: "ポイズンスパイダー", race: "beast", rarity: "uncommon", stats: { monster_count: 5, attack: 6, intelligence: 4, defense: 3, magicDefense: 3, speed: 6 } },
   // === 遺跡敵（レア） ===
-  30: { monster_count: 12, attack: 12, intelligence: 10, defense: 6, magicDefense: 8, speed: 5, range: 2 }, // ダークウィザード
-  31: { monster_count: 14, attack: 14, intelligence: 4, defense: 12, magicDefense: 6, speed: 4 }, // ガーゴイル
-  32: { monster_count: 10, attack: 16, intelligence: 2, defense: 6, magicDefense: 4, speed: 8 },  // シャドウアサシン
-  33: { monster_count: 9, attack: 6, intelligence: 14, defense: 4, magicDefense: 10, speed: 5, range: 2 },  // フレイムスピリット
-  34: { monster_count: 9, attack: 6, intelligence: 14, defense: 4, magicDefense: 10, speed: 5, range: 2 },  // アイスエレメンタル
-  35: { monster_count: 16, attack: 12, intelligence: 6, defense: 14, magicDefense: 8, speed: 4 }, // デスナイト
-  36: { monster_count: 14, attack: 14, intelligence: 12, defense: 10, magicDefense: 10, speed: 4 }, // ヒュドラ
-  37: { monster_count: 14, attack: 16, intelligence: 4, defense: 12, magicDefense: 6, speed: 5 }, // ミノタウロス
-
+  30: { name: "ダークウィザード", race: "demon", rarity: "rare", stats: { monster_count: 12, attack: 12, intelligence: 10, defense: 6, magicDefense: 8, speed: 5, range: 2 } },
+  31: { name: "ガーゴイル", race: "demon", rarity: "rare", stats: { monster_count: 14, attack: 14, intelligence: 4, defense: 12, magicDefense: 6, speed: 4 } },
+  32: { name: "シャドウアサシン", race: "demon", rarity: "rare", stats: { monster_count: 10, attack: 16, intelligence: 2, defense: 6, magicDefense: 4, speed: 8 } },
+  33: { name: "フレイムスピリット", race: "spirit", rarity: "rare", stats: { monster_count: 9, attack: 6, intelligence: 14, defense: 4, magicDefense: 10, speed: 5, range: 2 } },
+  34: { name: "アイスエレメンタル", race: "spirit", rarity: "rare", stats: { monster_count: 9, attack: 6, intelligence: 14, defense: 4, magicDefense: 10, speed: 5, range: 2 } },
+  35: { name: "デスナイト", race: "undead", rarity: "epic", stats: { monster_count: 16, attack: 12, intelligence: 6, defense: 14, magicDefense: 8, speed: 4 } },
+  36: { name: "ヒュドラ", race: "dragon", rarity: "epic", stats: { monster_count: 14, attack: 14, intelligence: 12, defense: 10, magicDefense: 10, speed: 4 } },
+  37: { name: "ミノタウロス", race: "giant", rarity: "epic", stats: { monster_count: 14, attack: 16, intelligence: 4, defense: 12, magicDefense: 6, speed: 5 } },
   // === 遺跡敵（レジェンダリー） ===
-  40: { monster_count: 30, attack: 25, intelligence: 18, defense: 20, magicDefense: 15, speed: 4 }, // ニーズヘッグ
-  41: { monster_count: 22, attack: 18, intelligence: 20, defense: 14, magicDefense: 18, speed: 6 }, // ヴァンパイアロード
-  42: { monster_count: 22, attack: 15, intelligence: 25, defense: 12, magicDefense: 20, speed: 5, range: 2 }, // リッチ
-  43: { monster_count: 35, attack: 22, intelligence: 12, defense: 25, magicDefense: 18, speed: 2 }, // タイタン
-
-  // === 収集可能魔獣 ===
-  // --- 獣族 ---
-  50: { monster_count: 8, attack: 4, intelligence: 2, defense: 3, magicDefense: 2, speed: 8 },   // バット
-  51: { monster_count: 10, attack: 6, intelligence: 3, defense: 5, magicDefense: 3, speed: 7 },  // ジャイアントバット
-  52: { monster_count: 12, attack: 7, intelligence: 4, defense: 5, magicDefense: 4, speed: 7 },  // ヴァンパイアバット
-  53: { monster_count: 14, attack: 9, intelligence: 5, defense: 6, magicDefense: 5, speed: 8, range: 2 },  // カマソッツ
-  54: { monster_count: 11, attack: 7, intelligence: 4, defense: 6, magicDefense: 3, speed: 5 },  // ボーゲスト
-  55: { monster_count: 14, attack: 10, intelligence: 5, defense: 7, magicDefense: 4, speed: 6 }, // ガイトラッシュ
-  56: { monster_count: 18, attack: 14, intelligence: 6, defense: 8, magicDefense: 5, speed: 9 }, // レウクロコタ
-  // --- 亜人族 ---
-  60: { monster_count: 6, attack: 5, intelligence: 2, defense: 2, magicDefense: 1, speed: 4, range: 3, cost: 1.0 },   // ゴブリンアーチャー
-  61: { monster_count: 10, attack: 5, intelligence: 5, defense: 5, magicDefense: 4, speed: 4, range: 2 },  // ゴブリンコック
-  62: { monster_count: 12, attack: 7, intelligence: 5, defense: 8, magicDefense: 5, speed: 5, range: 2 },  // ホブゴブリン
-  63: { monster_count: 14, attack: 8, intelligence: 4, defense: 10, magicDefense: 5, speed: 3 }, // オークアーマーナイト
-  64: { monster_count: 12, attack: 9, intelligence: 5, defense: 6, magicDefense: 4, speed: 6 },  // ゴブリンソードマン
-  65: { monster_count: 16, attack: 12, intelligence: 4, defense: 11, magicDefense: 6, speed: 5, range: 2 },// ホブゴブリンダークナイト
-  66: { monster_count: 15, attack: 12, intelligence: 10, defense: 10, magicDefense: 8, speed: 5 },// ゴブリンプリンセス
-  // --- 魔族 ---
-  70: { monster_count: 8, attack: 6, intelligence: 5, defense: 4, magicDefense: 5, speed: 5 },   // レッサーデーモン
-  71: { monster_count: 10, attack: 5, intelligence: 10, defense: 4, magicDefense: 8, speed: 6, range: 2 }, // サキュバス
-  72: { monster_count: 12, attack: 8, intelligence: 6, defense: 6, magicDefense: 5, speed: 7 },  // ナイトメア
-  73: { monster_count: 16, attack: 13, intelligence: 8, defense: 10, magicDefense: 8, speed: 5 },// アークデーモン
-  74: { monster_count: 14, attack: 10, intelligence: 16, defense: 8, magicDefense: 14, speed: 7, range: 2 },// リリス
-  // --- 竜族 ---
-  80: { monster_count: 8, attack: 7, intelligence: 4, defense: 5, magicDefense: 4, speed: 4 },   // リンドヴルム
-  81: { monster_count: 12, attack: 8, intelligence: 6, defense: 7, magicDefense: 6, speed: 5 },  // シーサーペント
-  82: { monster_count: 14, attack: 11, intelligence: 9, defense: 8, magicDefense: 7, speed: 5, range: 2 }, // ファイアドレイク
-  83: { monster_count: 20, attack: 18, intelligence: 14, defense: 16, magicDefense: 12, speed: 4, range: 2 },// バハムート
-  // --- 巨人族 ---
-  90: { monster_count: 10, attack: 7, intelligence: 2, defense: 6, magicDefense: 2, speed: 3 },  // オーガ
-  91: { monster_count: 14, attack: 9, intelligence: 3, defense: 9, magicDefense: 4, speed: 3 },  // サイクロプス
-  92: { monster_count: 18, attack: 10, intelligence: 3, defense: 14, magicDefense: 6, speed: 2 },// アイアンゴーレム
-  93: { monster_count: 22, attack: 16, intelligence: 5, defense: 18, magicDefense: 10, speed: 3 },// ギガース
-  // --- 精霊族 ---
-  100: { monster_count: 6, attack: 3, intelligence: 7, defense: 2, magicDefense: 6, speed: 6, range: 2 },  // ウィスプ
-  101: { monster_count: 8, attack: 4, intelligence: 9, defense: 3, magicDefense: 7, speed: 7, range: 2 },  // シルフ
-  102: { monster_count: 10, attack: 5, intelligence: 10, defense: 5, magicDefense: 9, speed: 5, range: 2 },// ウンディーネ
-  103: { monster_count: 14, attack: 12, intelligence: 11, defense: 7, magicDefense: 8, speed: 5, range: 2 },// イフリート
-  104: { monster_count: 16, attack: 10, intelligence: 15, defense: 8, magicDefense: 14, speed: 6, range: 2 },// フェニックス
-  // --- 不死族 ---
-  110: { monster_count: 10, attack: 5, intelligence: 1, defense: 6, magicDefense: 2, speed: 2 }, // ゾンビ
-  111: { monster_count: 8, attack: 4, intelligence: 8, defense: 3, magicDefense: 9, speed: 5, range: 2 },  // レイス
-  112: { monster_count: 12, attack: 8, intelligence: 5, defense: 7, magicDefense: 5, speed: 4 }, // ワイト
-  113: { monster_count: 14, attack: 11, intelligence: 4, defense: 10, magicDefense: 6, speed: 5 },// ドゥラハン
-  114: { monster_count: 16, attack: 8, intelligence: 18, defense: 8, magicDefense: 16, speed: 4, range: 2, cost: 1.0 },// エルダーリッチ
+  40: { name: "ニーズヘッグ", race: "dragon", rarity: "legendary", stats: { monster_count: 30, attack: 25, intelligence: 18, defense: 20, magicDefense: 15, speed: 4 } },
+  41: { name: "ヴァンパイアロード", race: "undead", rarity: "legendary", stats: { monster_count: 22, attack: 18, intelligence: 20, defense: 14, magicDefense: 18, speed: 6 } },
+  42: { name: "リッチ", race: "undead", rarity: "legendary", stats: { monster_count: 22, attack: 15, intelligence: 25, defense: 12, magicDefense: 20, speed: 5, range: 2 } },
+  43: { name: "タイタン", race: "giant", rarity: "legendary", stats: { monster_count: 35, attack: 22, intelligence: 12, defense: 25, magicDefense: 18, speed: 2 } },
+  // === 収集可能魔獣: 獣族 ===
+  50: { name: "バット", race: "beast", rarity: "common", stats: { monster_count: 8, attack: 4, intelligence: 2, defense: 3, magicDefense: 2, speed: 8 } },
+  51: { name: "ジャイアントバット", race: "beast", rarity: "uncommon", stats: { monster_count: 10, attack: 6, intelligence: 3, defense: 5, magicDefense: 3, speed: 7 } },
+  52: { name: "ヴァンパイアバット", race: "beast", rarity: "uncommon", stats: { monster_count: 12, attack: 7, intelligence: 4, defense: 5, magicDefense: 4, speed: 7 } },
+  53: { name: "カマソッツ", race: "beast", rarity: "rare", stats: { monster_count: 14, attack: 9, intelligence: 5, defense: 6, magicDefense: 5, speed: 8, range: 2 } },
+  54: { name: "ボーゲスト", race: "beast", rarity: "uncommon", stats: { monster_count: 11, attack: 7, intelligence: 4, defense: 6, magicDefense: 3, speed: 5 } },
+  55: { name: "ガイトラッシュ", race: "beast", rarity: "rare", stats: { monster_count: 14, attack: 10, intelligence: 5, defense: 7, magicDefense: 4, speed: 6 } },
+  56: { name: "レウクロコタ", race: "beast", rarity: "epic", stats: { monster_count: 18, attack: 14, intelligence: 6, defense: 8, magicDefense: 5, speed: 9 } },
+  // === 収集可能魔獣: 亜人族 ===
+  60: { name: "ゴブリンアーチャー", race: "demihuman", rarity: "common", stats: { monster_count: 6, attack: 5, intelligence: 2, defense: 2, magicDefense: 1, speed: 4, range: 3, cost: 1.0 } },
+  61: { name: "ゴブリンコック", race: "demihuman", rarity: "common", stats: { monster_count: 10, attack: 5, intelligence: 5, defense: 5, magicDefense: 4, speed: 4, range: 2 } },
+  62: { name: "ホブゴブリン", race: "demihuman", rarity: "uncommon", stats: { monster_count: 12, attack: 7, intelligence: 5, defense: 8, magicDefense: 5, speed: 5, range: 2 } },
+  63: { name: "オークアーマーナイト", race: "demihuman", rarity: "uncommon", stats: { monster_count: 14, attack: 8, intelligence: 4, defense: 10, magicDefense: 5, speed: 3 } },
+  64: { name: "ゴブリンソードマン", race: "demihuman", rarity: "uncommon", stats: { monster_count: 12, attack: 9, intelligence: 5, defense: 6, magicDefense: 4, speed: 6 } },
+  65: { name: "ホブゴブリンダークナイト", race: "demihuman", rarity: "rare", stats: { monster_count: 16, attack: 12, intelligence: 4, defense: 11, magicDefense: 6, speed: 5, range: 2 } },
+  66: { name: "ゴブリンプリンセス", race: "demihuman", rarity: "epic", stats: { monster_count: 15, attack: 12, intelligence: 10, defense: 10, magicDefense: 8, speed: 5 } },
+  // === 収集可能魔獣: 魔族 ===
+  70: { name: "レッサーデーモン", race: "demon", rarity: "common", stats: { monster_count: 8, attack: 6, intelligence: 5, defense: 4, magicDefense: 5, speed: 5 } },
+  71: { name: "サキュバス", race: "demon", rarity: "uncommon", stats: { monster_count: 10, attack: 5, intelligence: 10, defense: 4, magicDefense: 8, speed: 6, range: 2 } },
+  72: { name: "ナイトメア", race: "demon", rarity: "uncommon", stats: { monster_count: 12, attack: 8, intelligence: 6, defense: 6, magicDefense: 5, speed: 7 } },
+  73: { name: "アークデーモン", race: "demon", rarity: "rare", stats: { monster_count: 16, attack: 13, intelligence: 8, defense: 10, magicDefense: 8, speed: 5 } },
+  74: { name: "リリス", race: "demon", rarity: "epic", stats: { monster_count: 14, attack: 10, intelligence: 16, defense: 8, magicDefense: 14, speed: 7, range: 2 } },
+  // === 収集可能魔獣: 竜族 ===
+  80: { name: "リンドヴルム", race: "dragon", rarity: "common", stats: { monster_count: 8, attack: 7, intelligence: 4, defense: 5, magicDefense: 4, speed: 4 } },
+  81: { name: "シーサーペント", race: "dragon", rarity: "uncommon", stats: { monster_count: 12, attack: 8, intelligence: 6, defense: 7, magicDefense: 6, speed: 5 } },
+  82: { name: "ファイアドレイク", race: "dragon", rarity: "rare", stats: { monster_count: 14, attack: 11, intelligence: 9, defense: 8, magicDefense: 7, speed: 5, range: 2 } },
+  83: { name: "バハムート", race: "dragon", rarity: "epic", stats: { monster_count: 20, attack: 18, intelligence: 14, defense: 16, magicDefense: 12, speed: 4, range: 2 } },
+  // === 収集可能魔獣: 巨人族 ===
+  90: { name: "オーガ", race: "giant", rarity: "common", stats: { monster_count: 10, attack: 7, intelligence: 2, defense: 6, magicDefense: 2, speed: 3 } },
+  91: { name: "サイクロプス", race: "giant", rarity: "uncommon", stats: { monster_count: 14, attack: 9, intelligence: 3, defense: 9, magicDefense: 4, speed: 3 } },
+  92: { name: "アイアンゴーレム", race: "giant", rarity: "rare", stats: { monster_count: 18, attack: 10, intelligence: 3, defense: 14, magicDefense: 6, speed: 2 } },
+  93: { name: "ギガース", race: "giant", rarity: "epic", stats: { monster_count: 22, attack: 16, intelligence: 5, defense: 18, magicDefense: 10, speed: 3 } },
+  // === 収集可能魔獣: 精霊族 ===
+  100: { name: "ウィスプ", race: "spirit", rarity: "common", stats: { monster_count: 6, attack: 3, intelligence: 7, defense: 2, magicDefense: 6, speed: 6, range: 2 } },
+  101: { name: "シルフ", race: "spirit", rarity: "uncommon", stats: { monster_count: 8, attack: 4, intelligence: 9, defense: 3, magicDefense: 7, speed: 7, range: 2 } },
+  102: { name: "ウンディーネ", race: "spirit", rarity: "uncommon", stats: { monster_count: 10, attack: 5, intelligence: 10, defense: 5, magicDefense: 9, speed: 5, range: 2 } },
+  103: { name: "イフリート", race: "spirit", rarity: "rare", stats: { monster_count: 14, attack: 12, intelligence: 11, defense: 7, magicDefense: 8, speed: 5, range: 2 } },
+  104: { name: "フェニックス", race: "spirit", rarity: "epic", stats: { monster_count: 16, attack: 10, intelligence: 15, defense: 8, magicDefense: 14, speed: 6, range: 2 } },
+  // === 収集可能魔獣: 不死族 ===
+  110: { name: "ゾンビ", race: "undead", rarity: "common", stats: { monster_count: 10, attack: 5, intelligence: 1, defense: 6, magicDefense: 2, speed: 2 } },
+  111: { name: "レイス", race: "undead", rarity: "uncommon", stats: { monster_count: 8, attack: 4, intelligence: 8, defense: 3, magicDefense: 9, speed: 5, range: 2 } },
+  112: { name: "ワイト", race: "undead", rarity: "uncommon", stats: { monster_count: 12, attack: 8, intelligence: 5, defense: 7, magicDefense: 5, speed: 4 } },
+  113: { name: "ドゥラハン", race: "undead", rarity: "rare", stats: { monster_count: 14, attack: 11, intelligence: 4, defense: 10, magicDefense: 6, speed: 5 } },
+  114: { name: "エルダーリッチ", race: "undead", rarity: "epic", stats: { monster_count: 16, attack: 8, intelligence: 18, defense: 8, magicDefense: 16, speed: 4, range: 2, cost: 1.0 } },
 };
 
 /** キャラクターの完全ステータスを取得 */
 export function getCharacterStats(index: number): CardStats {
-  const custom = CHARACTER_STATS[index] ?? {};
+  const custom = CHARACTERS[index]?.stats ?? {};
   return { ...DEFAULT_CARD_STATS, ...custom };
 }
 
-/** 全キャラクター名 */
-const CHARACTER_NAMES: Record<number, string> = {
-  // プレイヤー初期魔獣（KC 7種族）
-  0: "ダイアウルフ",
-  1: "ゴブリンウォリアー",
-  2: "インプ",
-  3: "ワイバーン",
-  4: "ゴーレム",
-  5: "サラマンダー",
-  6: "スケルトンソルジャー",
-  7: "ヘルハウンド",
-  8: "リザードマン",
-  9: "トレント",
-  // フィールド敵
-  10: "ゴブリン",
-  11: "コボルド",
-  12: "オーク",
-  13: "スケルトン",
-  14: "トロール",
-  15: "ドレイク",
-  // 遺跡敵（ノーマル）
-  20: "ストーンゴーレム",
-  21: "ゴースト",
-  22: "スケルトンナイト",
-  23: "コカトリス",
-  24: "ミミック",
-  25: "ポイズンスパイダー",
-  // 遺跡敵（レア）
-  30: "ダークウィザード",
-  31: "ガーゴイル",
-  32: "シャドウアサシン",
-  33: "フレイムスピリット",
-  34: "アイスエレメンタル",
-  35: "デスナイト",
-  36: "ヒュドラ",
-  37: "ミノタウロス",
-  // 遺跡敵（レジェンダリー）
-  40: "ニーズヘッグ",
-  41: "ヴァンパイアロード",
-  42: "リッチ",
-  43: "タイタン",
-  // 獣族
-  50: "バット", 51: "ジャイアントバット", 52: "ヴァンパイアバット",
-  53: "カマソッツ", 54: "ボーゲスト", 55: "ガイトラッシュ", 56: "レウクロコタ",
-  // 亜人族
-  60: "ゴブリンアーチャー", 61: "ゴブリンコック", 62: "ホブゴブリン",
-  63: "オークアーマーナイト", 64: "ゴブリンソードマン", 65: "ホブゴブリンダークナイト", 66: "ゴブリンプリンセス",
-  // 魔族
-  70: "レッサーデーモン", 71: "サキュバス", 72: "ナイトメア", 73: "アークデーモン", 74: "リリス",
-  // 竜族
-  80: "リンドヴルム", 81: "シーサーペント", 82: "ファイアドレイク", 83: "バハムート",
-  // 巨人族
-  90: "オーガ", 91: "サイクロプス", 92: "アイアンゴーレム", 93: "ギガース",
-  // 精霊族
-  100: "ウィスプ", 101: "シルフ", 102: "ウンディーネ", 103: "イフリート", 104: "フェニックス",
-  // 不死族
-  110: "ゾンビ", 111: "レイス", 112: "ワイト", 113: "ドゥラハン", 114: "エルダーリッチ",
-};
-
-/** 魔獣のレアリティ */
-const CHARACTER_RARITY: Record<number, CardRarity> = {
-  // プレイヤー初期魔獣
-  0: "rare", 1: "rare", 2: "rare", 3: "rare", 4: "rare",
-  5: "rare", 6: "rare", 7: "rare", 8: "rare", 9: "rare",
-  // フィールド敵
-  10: "common", 11: "common", 12: "uncommon", 13: "uncommon", 14: "rare", 15: "epic",
-  // 遺跡敵（ノーマル）
-  20: "uncommon", 21: "uncommon", 22: "uncommon", 23: "rare", 24: "rare", 25: "uncommon",
-  // 遺跡敵（レア）
-  30: "rare", 31: "rare", 32: "rare", 33: "rare", 34: "rare", 35: "epic", 36: "epic", 37: "epic",
-  // 遺跡敵（レジェンダリー）
-  40: "legendary", 41: "legendary", 42: "legendary", 43: "legendary",
-  // 獣族
-  50: "common", 51: "uncommon", 52: "uncommon", 53: "rare", 54: "uncommon", 55: "rare", 56: "epic",
-  // 亜人族
-  60: "common", 61: "common", 62: "uncommon", 63: "uncommon", 64: "uncommon", 65: "rare", 66: "epic",
-  // 魔族
-  70: "common", 71: "uncommon", 72: "uncommon", 73: "rare", 74: "epic",
-  // 竜族
-  80: "common", 81: "uncommon", 82: "rare", 83: "epic",
-  // 巨人族
-  90: "common", 91: "uncommon", 92: "rare", 93: "epic",
-  // 精霊族
-  100: "common", 101: "uncommon", 102: "uncommon", 103: "rare", 104: "epic",
-  // 不死族
-  110: "common", 111: "uncommon", 112: "uncommon", 113: "rare", 114: "epic",
-};
-
-/** キャラクターの種族 */
-const CHARACTER_RACES: Record<number, Race> = {
-  0: "beast", 1: "demihuman", 2: "demon", 3: "dragon", 4: "giant",
-  5: "spirit", 6: "undead", 7: "beast", 8: "demihuman", 9: "spirit",
-  10: "demihuman", 11: "demihuman", 12: "demihuman", 13: "undead", 14: "giant", 15: "dragon",
-  20: "giant", 21: "undead", 22: "undead", 23: "beast", 24: "demon", 25: "beast",
-  30: "demon", 31: "demon", 32: "demon", 33: "spirit", 34: "spirit", 35: "undead", 36: "dragon", 37: "giant",
-  40: "dragon", 41: "undead", 42: "undead", 43: "giant",
-  // 獣族
-  50: "beast", 51: "beast", 52: "beast", 53: "beast", 54: "beast", 55: "beast", 56: "beast",
-  // 亜人族
-  60: "demihuman", 61: "demihuman", 62: "demihuman", 63: "demihuman", 64: "demihuman", 65: "demihuman", 66: "demihuman",
-  // 魔族
-  70: "demon", 71: "demon", 72: "demon", 73: "demon", 74: "demon",
-  // 竜族
-  80: "dragon", 81: "dragon", 82: "dragon", 83: "dragon",
-  // 巨人族
-  90: "giant", 91: "giant", 92: "giant", 93: "giant",
-  // 精霊族
-  100: "spirit", 101: "spirit", 102: "spirit", 103: "spirit", 104: "spirit",
-  // 不死族
-  110: "undead", 111: "undead", 112: "undead", 113: "undead", 114: "undead",
-};
-
+/** キャラクター名を取得（統合レコードから） */
 export function getBodyDisplayName(index: number): string {
-  return CHARACTER_NAMES[index] ?? `キャラ${index + 1}`;
+  return CHARACTERS[index]?.name ?? `キャラ${index + 1}`;
 }
 
 /** `public/cards/character-{id}.png` が存在する魔獣ID */
@@ -304,9 +194,9 @@ export function getCharacterIllustrationPath(index: number): string {
   return `/cards/character-${index}.png`;
 }
 
-/** 魔獣のレアリティを取得 */
+/** 魔獣のレアリティを取得（統合レコードから） */
 export function getCardRarity(index: number): CardRarity {
-  return CHARACTER_RARITY[index] ?? "common";
+  return CHARACTERS[index]?.rarity ?? "common";
 }
 
 export { getRarityColor, getRarityClass } from "../shared/rarity-colors";
@@ -338,15 +228,15 @@ export function getUniqueIllustratedSpeciesSlots(owned: number[]): number[] {
   return slots;
 }
 
-/** 魔獣の種族を取得 */
+/** 魔獣の種族を取得（統合レコードから） */
 export function getCardRace(index: number): Race {
-  return CHARACTER_RACES[index] ?? "demihuman";
+  return CHARACTERS[index]?.race ?? "demihuman";
 }
 
 /** 魔獣名からインデックスを取得 */
 export function getCardIndexByName(name: string): number | undefined {
-  for (const [idx, n] of Object.entries(CHARACTER_NAMES)) {
-    if (n === name) return parseInt(idx);
+  for (const [idx, def] of Object.entries(CHARACTERS)) {
+    if (def.name === name) return parseInt(idx);
   }
   return undefined;
 }

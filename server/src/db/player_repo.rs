@@ -199,6 +199,30 @@ pub(crate) async fn load_player(
     .await
     .unwrap_or_default();
 
+    // march_bodies をバッチ取得（N+1 回避）
+    let march_ids: Vec<String> = march_rows.iter().map(|r| r.get::<String, _>("march_id")).collect();
+    let all_body_rows = if !march_ids.is_empty() {
+        let placeholders: Vec<&str> = march_ids.iter().map(|_| "?").collect();
+        let sql = format!(
+            "SELECT * FROM player_march_bodies WHERE world_id = ? AND player_id = ? AND march_id IN ({}) ORDER BY body_index",
+            placeholders.join(",")
+        );
+        let mut q = sqlx::query(&sql).bind(world_id).bind(player_id);
+        for mid in &march_ids {
+            q = q.bind(mid);
+        }
+        q.fetch_all(pool).await.unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    // march_id → body rows のマップを構築
+    let mut body_map: HashMap<String, Vec<&sqlx::sqlite::SqliteRow>> = HashMap::new();
+    for brow in &all_body_rows {
+        let mid: String = brow.get("march_id");
+        body_map.entry(mid).or_default().push(brow);
+    }
+
     for mrow in &march_rows {
         let march_id: String = mrow.get("march_id");
         let kind_str: String = mrow.get("kind");
@@ -210,16 +234,7 @@ pub(crate) async fn load_player(
             _ => continue,
         };
 
-        // body詳細
-        let body_rows = sqlx::query(
-            "SELECT * FROM player_march_bodies WHERE world_id = ? AND player_id = ? AND march_id = ? ORDER BY body_index"
-        )
-        .bind(world_id)
-        .bind(player_id)
-        .bind(&march_id)
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
+        let body_rows = body_map.get(&march_id).map(|v| v.as_slice()).unwrap_or(&[]);
 
         let mut monsters_per_body = Vec::new();
         let mut body_names = Vec::new();
@@ -228,7 +243,7 @@ pub(crate) async fn load_player(
         let mut stats_per_body: Vec<CardStats> = Vec::new();
         let has_bodies = !body_rows.is_empty();
 
-        for brow in &body_rows {
+        for brow in body_rows {
             if let Some(mc) = brow.get::<Option<u32>, _>("monster_count") {
                 monsters_per_body.push(mc);
             }
