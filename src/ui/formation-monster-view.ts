@@ -14,20 +14,14 @@ import {
 } from "../shared/game-state";
 import {
   getBodyDisplayName, getCardRarityClass, getCharacterIllustrationPath,
-  getUniqueIllustratedSpeciesSlots,
+  getCharacterStats, getUniqueIllustratedSpeciesSlots,
 } from "../game/characters";
-import { getEffectiveUnitCostCap, getHomeTroops } from "../game/facility-selectors";
-import { recalcUnitStats } from "../game/formation";
+import { getEffectiveUnitCostCap } from "../game/facility-selectors";
+import { getHomeTroops, recalcUnitStats } from "../game/formation";
 import { commitFormedUnits } from "../game/formed-units-persist";
+import { showCardDetail } from "./formation-card-view";
 import {
-  openCardDetailBodySlot,
-  showCardDetail,
-  closeCardDetail,
-  refreshCardDetailContent,
-  findLatestProduceFeedback,
-  setProduceError,
-} from "./formation-card-view";
-import {
+  renderFormationContent,
   showFormationHubPanel,
 } from "./formation-hub-view";
 import { shared } from "./formation-shared";
@@ -40,10 +34,13 @@ function setCharPickerError(message: string | null): void {
 }
 
 export function openMonsterBrowse(): void {
+  shared.formationView = "monsters";
   shared.charPickerMode = "browse";
   shared.editingUnitId = null;
   shared.editingSlotIndex = null;
   setCharPickerError(null);
+  shared.hubEl?.classList.remove("is-active");
+  shared.formationModalEl?.classList.remove("is-active");
   updateCharPickerChrome();
   renderMonsterBrowseGrid();
   shared.characterPickerEl?.classList.add("is-open");
@@ -94,7 +91,7 @@ function unitFilledCostSum(indices: [number, number, number]): number {
   return s;
 }
 
-function renderMonsterBrowseGrid(): void {
+export function renderMonsterBrowseGrid(): void {
   const gridEl = shared.characterPickerEl?.querySelector("[data-char-picker-grid]")!;
   gridEl.innerHTML = "";
   const ownedCards = getPlayerOwnedCards(gameState, getLocalPlayerId());
@@ -120,7 +117,7 @@ function renderMonsterBrowseGrid(): void {
   }
 }
 
-function renderCharacterPicker(): void {
+export function renderCharacterPicker(): void {
   if (!shared.editingUnitId || shared.editingSlotIndex === null) return;
   const unit = formedUnitsList.find((u) => u.id === shared.editingUnitId);
   if (!unit) return;

@@ -43,7 +43,7 @@ export function createAppElements(appEl: HTMLDivElement): AppElements {
     logEl: createLogElement(),
     menuEl: createMenuElement(),
     unitSelectEl: createUnitSelectElement(),
-    formationEl: createFormationElement(),
+    formationEl: createFormationElementAndSetup(),
     homeEl: createHomeElement(),
     inventoryEl: createInventoryElement(),
     marketEl: createFleaMarketElement(),

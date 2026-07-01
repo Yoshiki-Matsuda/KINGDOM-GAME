@@ -8,7 +8,7 @@
  * - 非リアクティブな値（ws, homeFacilities, renderCallbacks）は proxy 外で管理
  */
 
-import { proxy, subscribe } from "valtio";
+import { proxy, subscribe } from "valtio/vanilla";
 import { USE_MOCK_STATE, wsUrlForMode } from "./config";
 import type { GameMode } from "./config";
 import { getStoredGameMode, persistGameMode } from "./network/game-mode-storage";
