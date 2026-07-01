@@ -3,15 +3,15 @@
  * 画面全体を構成し、各ビュー間のイベント設定を統合
  */
 
-import { render, getNextFormedUnitId } from "../store";
+import { render, getNextFormedUnitId, formedUnitsList, gameState } from "../store";
 import { getUnitCapacity } from "../game/facility-selectors";
+import { validateFormedUnits } from "../game/formation";
 import { appendFormedUnit } from "../store-actions";
 import {
   createFormationElement,
   showFormationHub,
   showFormationScreen,
   closeFormationScreen,
-  openFormationOverlay,
   showFormationHubPanel,
   showFormationModalPanel,
   renderFormationContent,
@@ -21,37 +21,65 @@ import {
   openMonsterBrowse,
   setupCharacterPickerListeners,
   openCharacterPicker,
+  renderMonsterBrowseGrid,
+  renderCharacterPicker,
 } from "./formation-monster-view";
 import {
   openCardDetailBodySlot,
   showCardDetail,
-  closeCardDetail,
   refreshCardDetailContent,
   findLatestProduceFeedback,
   setProduceError,
   setupCardDetailOverlayListener,
+  getPendingProduceBodySlot,
+  clearPendingProduceBodySlot,
 } from "./formation-card-view";
 import {
   statAllocBodySlot,
   setupStatAllocOverlayListener,
 } from "./formation-stat-dialog";
-import {
-  shared,
-} from "./formation-shared";
+import { shared } from "./formation-shared";
 
 // Re-exports for external consumers
 export { showFormationHub, showFormationScreen, closeFormationScreen };
 export { openCardDetailBodySlot, statAllocBodySlot };
+export { createFormationElement };
 
 export function createFormationElementAndSetup(): HTMLDivElement {
   const el = createFormationElement();
-  shared.formationEl = el;
   wireUpFormationScreen();
   return el;
 }
 
+/** サーバー state 更新後、編成画面を開いたままなら表示を同期 */
+export function refreshFormationScreenIfOpen(): void {
+  if (!shared.formationEl?.classList.contains("is-open")) return;
+  if (statAllocBodySlot !== null) return;
+
+  validateFormedUnits();
+  if (shared.formationView === "units") {
+    renderFormationContent();
+  } else if (shared.formationView === "monsters") {
+    renderMonsterBrowseGrid();
+  }
+  if (shared.characterPickerEl?.classList.contains("is-open") && shared.charPickerMode === "assign") {
+    renderCharacterPicker();
+  }
+  if (openCardDetailBodySlot !== null && shared.formationEl) {
+    refreshCardDetailContent(shared.formationEl, openCardDetailBodySlot);
+    if (getPendingProduceBodySlot() === openCardDetailBodySlot) {
+      const overlay = shared.formationEl.querySelector(".formation-card-detail-content");
+      const feedback = findLatestProduceFeedback(openCardDetailBodySlot);
+      if (overlay && feedback) {
+        setProduceError(overlay as HTMLElement, feedback.includes("生産した") ? null : feedback);
+      }
+      clearPendingProduceBodySlot();
+    }
+  }
+}
+
 function getMaxUnits(): number {
-  return Math.max(1, 1 + getUnitCapacity(getGameState()));
+  return Math.max(1, 1 + getUnitCapacity(gameState));
 }
 
 function wireUpFormationScreen(): void {
@@ -124,7 +152,7 @@ function wireUpFormationScreen(): void {
   setupStatAllocOverlayListener(shared.formationEl!);
 
   // Character picker listeners
-  const gridEl = shared.characterPickerEl?.querySelector("[data-char-picker-grid]")!;
+  const gridEl = shared.characterPickerEl?.querySelector("[data-char-picker-grid]") as HTMLDivElement;
   setupCharacterPickerListeners(gridEl, shared.characterPickerEl!);
 
   // Click outside to dismiss

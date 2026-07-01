@@ -16,8 +16,78 @@ import { ensureDevUnit, validateFormedUnits, recalcUnitStats, getHomeTroops } fr
 import { getEffectiveUnitCostCap, getUnitCapacity } from "../game/facility-selectors";
 import { commitFormedUnits } from "../game/formed-units-persist";
 import { escapeHtml } from "../utils";
-import { statAllocBodySlot } from "./formation-stat-dialog";
+import { renderScreenHeaderTitle } from "./screen-header";
+import { closeCardDetail } from "./formation-card-view";
 import { shared, setMapPointerBlocked } from "./formation-shared";
+
+export function createFormationElement(): HTMLDivElement {
+  const formationEl = document.createElement("div");
+  formationEl.className = "formation-overlay";
+  formationEl.innerHTML = `
+    <div class="formation-hub" data-formation-hub>
+      <div class="formation-hub-modal">
+        <div class="formation-hub-title">${renderScreenHeaderTitle("formation", "編成")}</div>
+        <p class="formation-hub-desc">行き先を選んでください</p>
+        <div class="formation-hub-actions">
+          <button type="button" class="formation-hub-btn" data-formation-hub="monsters">
+            <span class="formation-hub-btn-label">魔獣一覧</span>
+            <span class="formation-hub-btn-hint">所持魔獣の確認・生産</span>
+          </button>
+          <button type="button" class="formation-hub-btn" data-formation-hub="units">
+            <span class="formation-hub-btn-label">ユニット編成</span>
+            <span class="formation-hub-btn-hint">戦闘ユニットの編成</span>
+          </button>
+        </div>
+        <button type="button" class="formation-hub-close" data-formation-hub-close>閉じる</button>
+      </div>
+    </div>
+    <div class="formation-modal" data-formation-modal>
+      <div class="formation-title">${renderScreenHeaderTitle("formation", "ユニット編成")}</div>
+      <p class="formation-error" data-formation-error hidden></p>
+      <div class="formation-desc">枠をクリックしてキャラを選択。「外す」で枠を空に戻せます</div>
+      <div class="formation-troops" data-formation-troops>本拠地: 0 体</div>
+      <div class="formation-unit-list" data-formation-unit-list></div>
+      <button type="button" class="formation-add-unit" data-formation-add-unit>新規ユニットを追加</button>
+      <button type="button" class="formation-close" data-formation-close>戻る</button>
+    </div>
+  `;
+
+  shared.formationEl = formationEl;
+  shared.hubEl = formationEl.querySelector("[data-formation-hub]") as HTMLDivElement;
+  shared.formationModalEl = formationEl.querySelector("[data-formation-modal]") as HTMLDivElement;
+
+  shared.characterPickerEl = document.createElement("div");
+  shared.characterPickerEl.className = "formation-char-picker-overlay";
+  shared.characterPickerEl.innerHTML = `
+    <div class="formation-char-picker-modal">
+      <div class="formation-char-picker-title" data-char-picker-title>魔獣一覧</div>
+      <p class="formation-char-picker-desc" data-char-picker-desc hidden>タップで詳細を表示</p>
+      <p class="formation-error" data-char-picker-error hidden></p>
+      <div class="formation-char-picker-grid" data-char-picker-grid></div>
+      <button type="button" class="formation-char-picker-close" data-char-picker-close>戻る</button>
+    </div>
+  `;
+  formationEl.appendChild(shared.characterPickerEl);
+
+  shared.cardDetailEl = document.createElement("div");
+  shared.cardDetailEl.className = "formation-card-detail-overlay";
+  shared.cardDetailEl.innerHTML = `
+    <div class="formation-card-detail-modal">
+      <div class="formation-card-detail-content" data-card-detail-content></div>
+      <button type="button" class="formation-card-detail-close" data-card-detail-close>閉じる</button>
+    </div>
+  `;
+  formationEl.appendChild(shared.cardDetailEl);
+
+  shared.statAllocEl = document.createElement("div");
+  shared.statAllocEl.className = "formation-stat-alloc-overlay";
+  shared.statAllocEl.innerHTML = `
+    <div class="formation-stat-alloc-modal" data-stat-alloc-content></div>
+  `;
+  formationEl.appendChild(shared.statAllocEl);
+
+  return formationEl;
+}
 
 /** ユニット上限（施設ボーナス込み） */
 function getMaxUnits(): number {
@@ -50,6 +120,8 @@ export function showFormationHubPanel(): void {
   shared.formationView = "hub";
   shared.hubEl?.classList.add("is-active");
   shared.formationModalEl?.classList.remove("is-active");
+  shared.characterPickerEl?.classList.remove("is-open");
+  closeCardDetail();
 }
 
 export function showFormationModalPanel(): void {
@@ -71,6 +143,7 @@ export function openFormationOverlay(): void {
 /** ボトムメニュー「編成」→ 行き先選択 */
 export function showFormationHub(): void {
   openFormationOverlay();
+  shared.charPickerMode = "assign";
   showFormationHubPanel();
   (shared.formationEl?.querySelector("[data-formation-hub='monsters']") as HTMLElement)?.focus();
 }
@@ -78,7 +151,9 @@ export function showFormationHub(): void {
 /** ユニット編成画面を直接開く（ユニット選択などから） */
 export function showFormationScreen(): void {
   openFormationOverlay();
+  shared.charPickerMode = "assign";
   showFormationModalPanel();
+  shared.characterPickerEl?.classList.remove("is-open");
   renderFormationContent();
   (shared.formationEl?.querySelector("[data-formation-close]") as HTMLElement)?.focus();
 }
@@ -87,19 +162,11 @@ export function closeFormationScreen(): void {
   shared.formationEl?.classList.remove("is-open");
   shared.hubEl?.classList.remove("is-active");
   shared.formationModalEl?.classList.remove("is-active");
+  shared.characterPickerEl?.classList.remove("is-open");
   shared.formationView = "hub";
+  shared.charPickerMode = "assign";
+  closeCardDetail();
   setMapPointerBlocked(false);
-}
-
-/** サーバー state 更新後、編成画面を開いたままなら表示を同期 */
-export function refreshFormationScreenIfOpen(): void {
-  if (!shared.formationEl?.classList.contains("is-open")) return;
-  if (statAllocBodySlot !== null) return;
-
-  validateFormedUnits();
-  if (shared.formationView === "units") {
-    renderFormationContent();
-  }
 }
 
 function setFormationError(message: string | null): void {
